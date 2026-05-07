@@ -108,8 +108,10 @@ def get_master_db():
     if os.path.exists(DB_STORAGE):
         df = pd.read_csv(DB_STORAGE)
         df['Barcode'] = df['Barcode'].astype(str).str.replace(r'\.0$', '', regex=True)
+        if 'Stock' not in df.columns:
+            df['Stock'] = 1
         return df
-    return pd.DataFrame(columns=['Description', 'Barcode', 'Price'])
+    return pd.DataFrame(columns=['Description', 'Barcode', 'Price', 'Stock'])
 
 # --- INTERFACE ---
 tabs = ["📊 Cotação", "💰 Vendas", "⚙️ Gerenciar Banco"]
@@ -127,6 +129,9 @@ if aba == "📊 Cotação":
     
     # NOVA OPÇÃO NA BARRA LATERAL
     ignorar_01 = st.sidebar.checkbox("Ignorar 0 ou 1 à esquerda no EAN", value=False)
+    
+    # FILTRO DE ESTOQUE SOLICITADO
+    estoque_minimo = st.sidebar.number_input("Estoque mínimo para Barras:", min_value=0, value=1)
     
     discount = st.sidebar.number_input("Desconto (%)", 0.0)
     aplicar_arredondamento = st.sidebar.checkbox("Arredondar preços", value=True)
@@ -150,7 +155,9 @@ if aba == "📊 Cotação":
         price_col = col3.selectbox("Coluna Preço", t_df_view.columns)
 
         if st.button("🚀 Processar e Preservar Formatação"):
-            price_map = dict(zip(master_db['Barcode'].astype(str), master_db['Price']))
+            # Mapeamento alterado para incluir Preço e Estoque estruturados
+            master_db['Stock'] = pd.to_numeric(master_db['Stock'], errors='coerce').fillna(0)
+            product_map = dict(zip(master_db['Barcode'].astype(str), zip(master_db['Price'], master_db['Stock'])))
             
             if opcao_salvamento == "Mesmo nome do arquivo original":
                 output_name = target_file.name
@@ -175,18 +182,22 @@ if aba == "📊 Cotação":
                     found_p = None
                     b_val = ws.cell(row=r, column=b_idx).value
                     
-                    # 1. Busca por Barras (MODIFICADO APENAS AQUI)
+                    # 1. Busca por Barras (MODIFICADO COM FILTRO DE ESTOQUE)
                     if "Barras" in modo or "Híbrido" in modo:
                         barcodes = extract_all_barcodes(b_val)
                         for b in barcodes:
-                            if b in price_map:
-                                found_p = price_map[b]
-                                break
+                            if b in product_map:
+                                p_val, s_val = product_map[b]
+                                if s_val >= estoque_minimo:
+                                    found_p = p_val
+                                    break
                             elif ignorar_01:
                                 b_limpo = clean_barcode_prefix(b)
-                                if b_limpo in price_map:
-                                    found_p = price_map[b_limpo]
-                                    break
+                                if b_limpo in product_map:
+                                    p_val, s_val = product_map[b_limpo]
+                                    if s_val >= estoque_minimo:
+                                        found_p = p_val
+                                        break
                     
                     # 2. Busca por Similaridade
                     if found_p is None and ("Similaridade" in modo or "Híbrido" in modo):
@@ -301,8 +312,8 @@ elif aba == "⚙️ Gerenciar Banco":
     f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
     if f and st.button("💾 Salvar Banco"):
         df = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
-        df = df.iloc[:, [0, 1, 2]]
-        df.columns = ['Description', 'Barcode', 'Price']
+        df = df.iloc[:, [0, 1, 2, 3]]
+        df.columns = ['Description', 'Barcode', 'Price', 'Stock']
         df['Barcode'] = df['Barcode'].apply(lambda x: re.sub(r'\D', '', str(x).split('.')[0]))
         df.to_csv(DB_STORAGE, index=False)
         st.cache_data.clear()
