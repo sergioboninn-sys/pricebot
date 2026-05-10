@@ -90,7 +90,6 @@ def extract_all_barcodes(val):
     text = str(val).split('.')[0]
     return re.findall(r'\d{8,14}', text)
 
-# NOVA FUNÇÃO DE APOIO
 def clean_barcode_prefix(barcode):
     if len(barcode) > 8 and (barcode.startswith('0') or barcode.startswith('1')):
         return barcode[1:]
@@ -126,11 +125,8 @@ if aba == "📊 Cotação":
     
     st.sidebar.header("Configurações")
     modo = st.sidebar.selectbox("Regra de Busca:", ["Híbrido (Barras + Similaridade)", "Apenas Barras", "Apenas Similaridade"])
-    
-    # NOVA OPÇÃO NA BARRA LATERAL
     ignorar_01 = st.sidebar.checkbox("Ignorar 0 ou 1 à esquerda no EAN", value=False)
     
-    # FILTRO DE ESTOQUE SOLICITADO
     estoque_minimo = st.sidebar.number_input("Estoque mínimo para Barras:", min_value=0, value=1)
     
     discount = st.sidebar.number_input("Desconto (%)", 0.0)
@@ -155,7 +151,6 @@ if aba == "📊 Cotação":
         price_col = col3.selectbox("Coluna Preço", t_df_view.columns)
 
         if st.button("🚀 Processar e Preservar Formatação"):
-            # Mapeamento alterado para incluir Preço e Estoque estruturados
             master_db['Stock'] = pd.to_numeric(master_db['Stock'], errors='coerce').fillna(0)
             product_map = dict(zip(master_db['Barcode'].astype(str), zip(master_db['Price'], master_db['Stock'])))
             
@@ -174,7 +169,6 @@ if aba == "📊 Cotação":
                 b_idx = col_indices[bar_col.strip()]
                 p_idx = col_indices[price_col.strip()]
                 
-                # PROCESSAMENTO
                 for r in range(int(start_row), ws.max_row + 1):
                     d_val = ws.cell(row=r, column=d_idx).value
                     if not d_val or str(d_val).strip() == "": continue
@@ -182,7 +176,6 @@ if aba == "📊 Cotação":
                     found_p = None
                     b_val = ws.cell(row=r, column=b_idx).value
                     
-                    # 1. Busca por Barras (MODIFICADO COM FILTRO DE ESTOQUE)
                     if "Barras" in modo or "Híbrido" in modo:
                         barcodes = extract_all_barcodes(b_val)
                         for b in barcodes:
@@ -199,7 +192,6 @@ if aba == "📊 Cotação":
                                         found_p = p_val
                                         break
                     
-                    # 2. Busca por Similaridade
                     if found_p is None and ("Similaridade" in modo or "Híbrido" in modo):
                         best_sim = 0
                         d_det = extrair_detalhes(d_val)
@@ -230,7 +222,6 @@ if aba == "📊 Cotação":
             except Exception as e:
                 st.error(f"Erro ao processar: {e}")
 
-# AS DEMAIS ABAS PERMANECEM EXATAMENTE IGUAIS
 elif aba == "💰 Vendas":
     st.title("💰 Consulta e Pré-Pedido")
     master_db = get_master_db()
@@ -312,12 +303,31 @@ elif aba == "⚙️ Gerenciar Banco":
     f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
     if f and st.button("💾 Salvar Banco"):
         df = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
-        df = df.iloc[:, [0, 1, 2, 3]]
-        df.columns = ['Description', 'Barcode', 'Price', 'Stock']
+        
+        # Espera-se 5 colunas: Descrição, Barras, Caixa, Quant, Estoque
+        df = df.iloc[:, [0, 1, 2, 3, 4]]
+        df.columns = ['Description', 'Barcode', 'Caixa', 'Quant', 'Stock']
+        
+        # Função interna para extrair o primeiro número inteiro de uma string
+        def extrair_apenas_numero(valor):
+            match = re.search(r'\d+', str(valor))
+            return int(match.group()) if match else 1
+
+        # Processamento de limpeza
         df['Barcode'] = df['Barcode'].apply(lambda x: re.sub(r'\D', '', str(x).split('.')[0]))
-        df.to_csv(DB_STORAGE, index=False)
+        df['Caixa'] = pd.to_numeric(df['Caixa'], errors='coerce').fillna(0)
+        df['Quant_Int'] = df['Quant'].apply(extrair_apenas_numero)
+        
+        # Cálculo do Preço Unitário (Preço = Caixa / Quantidade extraída)
+        # Se a quantidade for 0, mantém o preço da caixa para evitar erro
+        df['Price'] = df.apply(lambda r: r['Caixa'] / r['Quant_Int'] if r['Quant_Int'] > 0 else r['Caixa'], axis=1)
+        
+        # Reorganiza para o formato padrão do sistema (4 colunas)
+        df_final = df[['Description', 'Barcode', 'Price', 'Stock']]
+        
+        df_final.to_csv(DB_STORAGE, index=False)
         st.cache_data.clear()
-        st.success("Banco Atualizado com Sucesso!")
+        st.success("Banco Atualizado com Sucesso! (Preços unitários calculados)")
 
 elif aba == "👤 Usuários":
     st.title("👤 Gestão de Usuários")
