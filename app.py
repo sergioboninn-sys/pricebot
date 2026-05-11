@@ -14,7 +14,7 @@ from streamlit.components.v1 import html
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="Automatizador de Preços PRO", layout="wide")
 
-# --- INJEÇÃO DE JAVASCRIPT (ATALHOS F1 E F5) ---
+# --- INJEÇÃO DE JAVASCRIPT (F1 E F5) ---
 js_shortcuts = """
 <script>
     const doc = window.parent.document;
@@ -44,17 +44,13 @@ html(js_shortcuts, height=0)
 # --- CONSTANTES E STORAGE ---
 DB_STORAGE = "master_database.csv"
 USERS_STORAGE = "users_db.json"
-VENDAS_STORAGE = "vendas_history.json"
 
 # --- INICIALIZAÇÃO DE ESTADO ---
 if 'carrinho' not in st.session_state:
     st.session_state.carrinho = []
 if 'replicar_data' not in st.session_state:
     st.session_state.replicar_data = None
-if 'autenticado' not in st.session_state:
-    st.session_state.autenticado = False
 
-# --- FUNÇÕES DE USUÁRIO ---
 def load_users():
     if not os.path.exists(USERS_STORAGE):
         return {"admin": {"password": "admin123", "expiry": "2099-12-31", "role": "admin"}}
@@ -64,23 +60,22 @@ def save_users(users):
     with open(USERS_STORAGE, "w") as f: json.dump(users, f)
 
 # --- LOGIN ---
-if not st.session_state.autenticado:
-    st.sidebar.title("🔐 Acesso Restrito")
+if 'autenticado' not in st.session_state:
+    st.session_state.autenticado = False
+
+def login():
+    st.sidebar.title("🔐 Acesso")
     u = st.sidebar.text_input("Usuário")
     p = st.sidebar.text_input("Senha", type="password")
     if st.sidebar.button("Entrar"):
         users = load_users()
         if u in users and users[u]['password'] == p:
-            exp_date = datetime.strptime(users[u]['expiry'], "%Y-%m-%d")
-            if datetime.now() <= exp_date:
-                st.session_state.autenticado = True
-                st.session_state.user_role = users[u]['role']
-                st.session_state.user_name = u
-                st.rerun()
-            else:
-                st.sidebar.error("Acesso expirado.")
-        else:
-            st.sidebar.error("Credenciais inválidas.")
+            st.session_state.autenticado = True
+            st.session_state.user_role = users[u]['role']
+            st.rerun()
+
+if not st.session_state.autenticado:
+    login()
     st.stop()
 
 # --- FUNÇÕES DE APOIO ---
@@ -131,13 +126,13 @@ if aba == "📊 Cotação":
     master_db = get_master_db()
     
     st.sidebar.header("Configurações")
-    modo = st.sidebar.selectbox("Regra de Busca:", ["Híbrido (Barras + Similaridade)", "Apenas Barras", "Apenas Similaridade"])
+    modo = st.sidebar.selectbox("Regra de Busca:", ["Híbrido", "Apenas Barras", "Apenas Similaridade"])
     ignorar_01 = st.sidebar.checkbox("Ignorar 0 ou 1 à esquerda no EAN", value=True)
     estoque_minimo = st.sidebar.number_input("Estoque mínimo no banco para validar preço:", min_value=0, value=1)
     discount = st.sidebar.number_input("Desconto (%)", 0.0)
     aplicar_arredondamento = st.sidebar.checkbox("Arredondar preços", value=True)
 
-    target_file = st.file_uploader("Upload Planilha de Destino", type=["xlsx"])
+    target_file = st.file_uploader("Planilha de Destino", type=["xlsx"])
     if target_file:
         c1, c2 = st.columns(2)
         header_pos = c1.number_input("Linha do Cabeçalho:", 1, 100, 10)
@@ -203,11 +198,11 @@ if aba == "📊 Cotação":
                 out = io.BytesIO()
                 wb.save(out)
                 st.success(f"Concluído! {preenchidos} preços carimbados.")
-                st.download_button("📥 Baixar Resultado", out.getvalue(), f"PRE_COTACAO_{target_file.name}")
+                st.download_button("📥 Baixar Resultado", out.getvalue(), target_file.name)
 
-# --- ABA 2: VENDAS (LOGICA COMPLETA RESTAURADA) ---
+# --- ABA 2: VENDAS ---
 elif aba == "💰 Vendas":
-    st.title("💰 Consulta e Pré-Pedido")
+    st.title("💰 Consulta e Vendas")
     master_db = get_master_db()
     
     query = st.text_input("🔍 Pesquisar Produto:", placeholder="Digite e pressione Enter (F1 para focar, F5 para limpar)")
@@ -232,14 +227,13 @@ elif aba == "💰 Vendas":
                         "preco": row['preço'],
                         "total": extra_round(row['preço'] * qtd)
                     })
-                    st.toast("Adicionado ao carrinho!")
                     st.rerun()
 
     if st.session_state.carrinho:
         st.divider()
-        st.subheader("🛒 Itens do Pedido")
+        st.subheader("🛒 Carrinho")
         df_car = pd.DataFrame(st.session_state.carrinho)
-        st.dataframe(df_car, use_container_width=True)
+        st.table(df_car)
         total_geral = df_car['total'].sum()
         st.write(f"### Total Geral: R$ {extra_round(total_geral)}")
         
@@ -247,69 +241,48 @@ elif aba == "💰 Vendas":
             st.session_state.carrinho = []
             st.rerun()
 
-# --- ABA 3: GERENCIAR BANCO (AQUI ESTÃO AS NOVAS IMPLANTAÇÕES) ---
+# --- ABA 3: GERENCIAR BANCO (6 COLUNAS E CÁLCULO) ---
 elif aba == "⚙️ Gerenciar Banco":
     st.title("⚙️ Gerenciar Banco de Dados")
-    st.markdown("### Configurações de Importação")
-    st.info("O arquivo deve conter as 6 colunas na ordem: descrição, codigo barras, preço, estoque, caixa, QUANT")
-    
-    file_db = st.file_uploader("Upload Banco Mestre (Excel ou CSV)", type=["xlsx", "csv"])
-    
-    if file_db:
-        if st.button("💾 Processar e Salvar no Sistema"):
-            try:
-                df = pd.read_excel(file_db) if file_db.name.endswith('.xlsx') else pd.read_csv(file_db)
-                
-                # Garante que pegamos apenas as 6 primeiras colunas e renomeamos corretamente
-                df = df.iloc[:, [0, 1, 2, 3, 4, 5]]
-                df.columns = ['descrição', 'codigo barras', 'preço', 'estoque', 'caixa', 'QUANT']
-                
-                # Função interna para extrair apenas o número da coluna QUANT (ex: "12 un" -> 12)
-                def get_num_only(v):
-                    m = re.search(r'\d+', str(v))
-                    return int(m.group()) if m else 1
+    f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
+    if f and st.button("💾 Salvar Banco"):
+        df = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
+        
+        # Manutenção das 6 colunas
+        df = df.iloc[:, [0, 1, 2, 3, 4, 5]]
+        df.columns = ['descrição', 'codigo barras', 'preço', 'estoque', 'caixa', 'QUANT']
+        
+        def extrair_inteiro(valor):
+            numeros = re.findall(r'\d+', str(valor))
+            return int(numeros[0]) if numeros else 1
 
-                # Limpeza de dados e cálculos
-                df['codigo barras'] = df['codigo barras'].apply(format_barcode_robust)
-                df['caixa'] = pd.to_numeric(df['caixa'], errors='coerce').fillna(0)
-                df['estoque'] = pd.to_numeric(df['estoque'], errors='coerce').fillna(0)
-                
-                # O preço agora é calculado pela divisão solicitada
-                df['preço'] = df.apply(lambda r: r['caixa'] / get_num_only(r['QUANT']), axis=1)
-                
-                # Salva o arquivo CSV final com as 6 colunas
-                df.to_csv(DB_STORAGE, index=False)
-                st.cache_data.clear()
-                st.success("Banco de dados atualizado com 06 colunas e preços unitários calculados!")
-                st.dataframe(df.head(10))
-            except Exception as e:
-                st.error(f"Erro ao processar arquivo: {e}")
+        df['codigo barras'] = df['codigo barras'].apply(format_barcode_robust)
+        df['caixa'] = pd.to_numeric(df['caixa'], errors='coerce').fillna(0)
+        
+        # Preço = Caixa / QUANT (número extraído)
+        df['preço'] = df.apply(lambda r: r['caixa'] / extrair_inteiro(r['QUANT']), axis=1)
+        
+        df.to_csv(DB_STORAGE, index=False)
+        st.cache_data.clear()
+        st.success("Banco Atualizado com 06 Colunas e Preços Calculados!")
+        st.dataframe(df.head())
 
-# --- ABA 4: USUÁRIOS (LOGICA COMPLETA RESTAURADA) ---
+# --- ABA 4: USUÁRIOS ---
 elif aba == "👤 Usuários":
     st.title("👤 Gestão de Usuários")
     users = load_users()
+    nu = st.text_input("Novo Usuário")
+    np = st.text_input("Nova Senha")
+    if st.button("Criar"):
+        users[nu] = {"password": np, "expiry": "2099-12-31", "role": "user"}
+        save_users(users)
+        st.rerun()
     
-    with st.expander("➕ Adicionar Novo Usuário"):
-        new_u = st.text_input("Nome do Usuário")
-        new_p = st.text_input("Senha")
-        new_v = st.number_input("Dias de Validade", 1, 365, 30)
-        if st.button("Cadastrar"):
-            if new_u and new_p:
-                exp_date = (datetime.now() + timedelta(days=new_v)).strftime("%Y-%m-%d")
-                users[new_u] = {"password": new_p, "expiry": exp_date, "role": "user"}
-                save_users(users)
-                st.success(f"Usuário {new_u} criado!")
-                st.rerun()
-
     st.divider()
-    st.subheader("Usuários Existentes")
     for user, data in users.items():
         if user != "admin":
-            c1, c2, c3 = st.columns([2, 2, 1])
-            c1.write(f"**{user}** ({data['role']})")
-            c2.write(f"Expira em: {data['expiry']}")
-            if c3.button("Remover", key=f"del_{user}"):
+            st.write(f"Usuário: {user}")
+            if st.button(f"Excluir {user}"):
                 del users[user]
                 save_users(users)
                 st.rerun()
