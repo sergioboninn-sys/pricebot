@@ -296,31 +296,30 @@ elif aba == "💰 Vendas":
         else:
             st.info("Carrinho vazio.")
 
-# --- ABA 3: GERENCIAR BANCO ---
+# --- ABA 3: GERENCIAR BANCO (TOTALMENTE BLINDADA CONTRA ERROS DE KEY) ---
 elif aba == "⚙️ Gerenciar Banco":
     st.title("⚙️ Gerenciar Banco")
     f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
     if f and st.button("💾 Salvar Banco"):
-        df_novo = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
+        df_file = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
         
-        # Inicializa as variáveis com None
-        c_desc_name, c_bar_name, c_stock_name, c_caixa_name, c_quant_name = None, None, None, None, None
-        
-        # Procura as colunas de forma inteligente via Regex ignorando acentos/encoding/cases
-        for col in df_novo.columns:
-            col_clean = str(col).strip().lower()
-            if re.search(r'desc', col_clean): c_desc_name = col
-            elif re.search(r'bar|ean|c\xf3digo', col_clean): c_bar_name = col
-            elif re.search(r'est|stock', col_clean): c_stock_name = col
-            elif re.search(r'caix', col_clean): c_caixa_name = col
-            elif re.search(r'quan', col_clean): c_quant_name = col
+        # Cria um dicionário dinâmico mapeando o que o arquivo TEM para o que o loop original PRECISA
+        mapping = {}
+        for col in df_file.columns:
+            c_clean = str(col).strip().lower()
+            if re.search(r'desc', c_clean): mapping['Description'] = df_file[col]
+            elif re.search(r'bar|ean|c\xf3digo|bairros', c_clean): mapping['Barcode'] = df_file[col]
+            elif re.search(r'est|stock', c_clean): mapping['Stock'] = df_file[col]
+            elif re.search(r'caix', c_clean): mapping['caixa'] = df_file[col]
+            elif re.search(r'quan', c_clean): mapping['QUANT'] = df_file[col]
 
-        # Fallbacks de segurança caso o regex não encontre alguma coluna específica
-        if not c_desc_name: c_desc_name = df_novo.columns[0]
-        if not c_bar_name: c_bar_name = df_novo.columns[1] if len(df_novo.columns) > 1 else df_novo.columns[0]
-        if not c_stock_name: c_stock_name = df_novo.columns[3] if len(df_novo.columns) > 3 else df_novo.columns[0]
-        if not c_caixa_name: c_caixa_name = df_novo.columns[4] if len(df_novo.columns) > 4 else df_novo.columns[0]
-        if not c_quant_name: c_quant_name = df_novo.columns[5] if len(df_novo.columns) > 5 else df_novo.columns[0]
+        # Reconstrói um DataFrame temporário garantindo que todas as chaves existam com dados válidos
+        df_novo = pd.DataFrame()
+        df_novo['Description'] = mapping.get('Description', pd.Series([""] * len(df_file)))
+        df_novo['Barcode'] = mapping.get('Barcode', pd.Series([""] * len(df_file)))
+        df_novo['Stock'] = mapping.get('Stock', pd.Series([0] * len(df_file)))
+        df_novo['caixa'] = mapping.get('caixa', pd.Series([0.0] * len(df_file)))
+        df_novo['QUANT'] = mapping.get('QUANT', pd.Series([1] * len(df_file)))
 
         df_antigo = get_master_db()
         
@@ -333,12 +332,13 @@ elif aba == "⚙️ Gerenciar Banco":
         if not df_antigo.empty:
             antigo_dict = dict(zip(df_antigo['Barcode'].astype(str), df_antigo['QUANT']))
             
+        # LOOP ORIGINAL INTEGRAL - Executa com segurança total agora
         for idx, row in df_novo.iterrows():
-            raw_desc = row[c_desc_name] if c_desc_name in df_novo.columns else ""
-            raw_barcode = row[c_bar_name] if c_bar_name in df_novo.columns else ""
-            raw_stock = row[c_stock_name] if c_stock_name in df_novo.columns else 0
-            raw_caixa = row[c_caixa_name] if c_caixa_name in df_novo.columns else 0.0
-            raw_quant = row[c_quant_name] if c_quant_name in df_novo.columns else 1
+            raw_desc = row['Description']
+            raw_barcode = row['Barcode']
+            raw_stock = row['Stock']
+            raw_caixa = row['caixa']
+            raw_quant = row['QUANT']
             
             barcode_str = re.sub(r'\D', '', str(raw_barcode).split('.')[0])
             if not barcode_str: continue
