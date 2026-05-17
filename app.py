@@ -297,13 +297,15 @@ elif aba == "💰 Vendas":
         else:
             st.info("Carrinho vazio.")
 
-# --- ABA 3: GERENCIAR BANCO (RESOLVIDO DEFINITIVAMENTE COM LEITURA POR ÍNDICE NUMÉRICO) ---
+# --- ABA 3: GERENCIAR BANCO (MAPEADO DIRETAMENTE PELO NOME DOS CABEÇALHOS REAIS) ---
 elif aba == "⚙️ Gerenciar Banco":
     st.title("⚙️ Gerenciar Banco")
     f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
     if f and st.button("💾 Salvar Banco"):
         df_novo = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
-        df_novo = df_novo.iloc[:, [0, 1, 2, 3, 4, 5]]
+        
+        # Remove espaços em branco das colunas para evitar descompassos
+        df_novo.columns = [str(c).strip() for c in df_novo.columns]
         
         df_antigo = get_master_db()
         
@@ -317,13 +319,12 @@ elif aba == "⚙️ Gerenciar Banco":
             antigo_dict = dict(zip(df_antigo['Barcode'].astype(str), df_antigo['QUANT']))
             
         for idx, row in df_novo.iterrows():
-            # Leitura direta por índice físico da coluna para evitar conflito de nomes (case sensitive)
-            raw_desc = row.iloc[0]
-            raw_barcode = row.iloc[1]
-            raw_price = row.iloc[2]
-            raw_stock = row.iloc[3]
-            raw_caixa = row.iloc[4]
-            raw_quant = row.iloc[5]
+            # Busca cirúrgica pelos nomes exatos das colunas da sua planilha original
+            raw_desc = row['descrição'] if 'descrição' in df_novo.columns else ""
+            raw_barcode = row['codigo barras'] if 'codigo barras' in df_novo.columns else ""
+            raw_stock = row['estoque'] if 'estoque' in df_novo.columns else 0
+            raw_caixa = row['caixa'] if 'caixa' in df_novo.columns else 0.0
+            raw_quant = row['QUANT'] if 'QUANT' in df_novo.columns else 1
             
             barcode_str = re.sub(r'\D', '', str(raw_barcode).split('.')[0])
             
