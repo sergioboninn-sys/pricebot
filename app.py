@@ -14,7 +14,7 @@ from streamlit.components.v1 import html
 # --- CONFIGURAÇÃO E PERSISTÊNCIA ---
 st.set_page_config(page_title="Automatizador de Preços PRO", layout="wide")
 
-# --- INJEÇÃO DE JAVASCRIPT (F1 E F5 CORRIGIDO PARA NÃO RESETAR A PÁGINA) ---
+# --- INJEÇÃO DE JAVASCRIPT (F1 E F5 - LIMPA SÓ O CAMPO SEM RESETAR) ---
 js_shortcuts = """
 <script>
     const doc = window.parent.document;
@@ -302,15 +302,28 @@ elif aba == "💰 Vendas":
         else:
             st.info("Carrinho vazio.")
 
-# --- ABA 3: GERENCIAR BANCO (RESOLVIDO DE FORMA SIMPLES E DIRETA) ---
+# --- ABA 3: GERENCIAR BANCO (CORRIGIDA INTEGRALMENTE CONFORME ESTRUTURA ORIGINAL) ---
 elif aba == "⚙️ Gerenciar Banco":
     st.title("⚙️ Gerenciar Banco")
     f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
     if f and st.button("💾 Salvar Banco"):
-        df_input = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
+        df_novo = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
         
-        # Deixa todos os nomes de colunas da planilha em letras minúsculas e sem espaços
-        df_input.columns = [str(c).strip().lower() for c in df_input.columns]
+        # Garante a remoção de espaços em branco nos nomes das colunas vindas do arquivo
+        df_novo.columns = [str(c).strip() for c in df_novo.columns]
+        
+        # MAPEAMENTO RIGOROSO DOS NOMES REAIS DA PLANILHA PARA A EXIGÊNCIA DO SEU SISTEMA ORIGINAL
+        mapeamento_colunas = {
+            'descrição': 'Description',
+            'codigo barras': 'Barcode',
+            'preço': 'Price',
+            'estoque': 'Stock',
+            'caixa': 'caixa',
+            'QUANT': 'QUANT'
+        }
+        
+        # Renomeia dinamicamente apenas as colunas que casarem com a sua tabela original
+        df_novo.rename(columns=mapeamento_colunas, inplace=True)
         
         df_antigo = get_master_db()
         
@@ -318,52 +331,48 @@ elif aba == "⚙️ Gerenciar Banco":
             m = re.search(r'\d+', str(v))
             return int(m.group()) if m else 1
 
-        # Mapeia os fatores QUANT já existentes para não perdê-los
+        lista_final = []
         antigo_dict = {}
         if not df_antigo.empty:
             antigo_dict = dict(zip(df_antigo['Barcode'].astype(str), df_antigo['QUANT']))
             
-        lista_final = []
-        
-        # Faz a iteração simples padrão linha por linha
-        for idx, row in df_input.iterrows():
-            # Pega as informações de forma limpa usando letras minúsculas
-            raw_desc = row.get('descrição', '')
-            raw_barcode = row.get('codigo barras', '')
-            raw_stock = row.get('estoque', 0)
-            raw_caixa = row.get('caixa', 0.0)
-            raw_quant = row.get('quant', 1)
+        for idx, row in df_novo.iterrows():
+            # Extração segura e padronizada das colunas renomeadas
+            raw_desc = row['Description'] if 'Description' in df_novo.columns else ""
+            raw_barcode = row['Barcode'] if 'Barcode' in df_novo.columns else ""
+            raw_stock = row['Stock'] if 'Stock' in df_novo.columns else 0
+            raw_caixa = row['caixa'] if 'caixa' in df_novo.columns else 0.0
+            raw_quant = row['QUANT'] if 'QUANT' in df_novo.columns else 1
             
-            # Limpa o formato do código de barras
+            # Limpeza original do código de barras
             barcode_str = re.sub(r'\D', '', str(raw_barcode).split('.')[0])
             if not barcode_str: continue
             
-            # REGRA PEDIDA: Preserva a QUANT do banco antigo, se for novo usa a da planilha
+            # REGRA MANTIDA: Preserva o fator QUANT antigo. Se for produto novo, adota o do arquivo enviado.
             if barcode_str in antigo_dict:
                 quant_final = antigo_dict[barcode_str]
             else:
                 quant_final = raw_quant
                 
-            # Calcula o preço correto baseado no fator de divisão
             divisor = get_num_only(quant_final)
-            v_caixa = pd.to_numeric(raw_caixa, errors='coerce')
-            v_caixa = float(v_caixa) if not pd.isna(v_caixa) else 0.0
-            preco_calculado = v_caixa / divisor if divisor > 0 else 0.0
             
-            # Salva no formato padrão oficial esperado pelo sistema
+            nova_caixa = pd.to_numeric(raw_caixa, errors='coerce')
+            nova_caixa = float(nova_caixa) if not pd.isna(nova_caixa) else 0.0
+            preco_calculado = nova_caixa / divisor if divisor > 0 else 0.0
+            
             lista_final.append({
                 'Description': raw_desc,
                 'Barcode': barcode_str,
                 'Price': preco_calculado,
                 'Stock': pd.to_numeric(raw_stock, errors='coerce').fillna(0),
-                'caixa': v_caixa,
+                'caixa': nova_caixa,
                 'QUANT': quant_final
             })
             
         df_resultado = pd.DataFrame(lista_final)
         df_resultado.to_csv(DB_STORAGE, index=False)
         st.cache_data.clear()
-        st.success("Banco Atualizado com Sucesso!")
+        st.success("Banco Atualizado! Sincronização realizada com preservação de fatores QUANT antigos.")
         st.dataframe(df_resultado.head())
 
 # --- ABA 4: USUÁRIOS ---
