@@ -296,30 +296,22 @@ elif aba == "💰 Vendas":
         else:
             st.info("Carrinho vazio.")
 
-# --- ABA 3: GERENCIAR BANCO (TOTALMENTE BLINDADA CONTRA ERROS DE KEY) ---
+# --- ABA 3: GERENCIAR BANCO (TOTALMENTE IMPERMEÁVEL A ERROS DE NOME DE COLUNA) ---
 elif aba == "⚙️ Gerenciar Banco":
     st.title("⚙️ Gerenciar Banco")
     f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
     if f and st.button("💾 Salvar Banco"):
         df_file = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
         
-        # Cria um dicionário dinâmico mapeando o que o arquivo TEM para o que o loop original PRECISA
-        mapping = {}
-        for col in df_file.columns:
-            c_clean = str(col).strip().lower()
-            if re.search(r'desc', c_clean): mapping['Description'] = df_file[col]
-            elif re.search(r'bar|ean|c\xf3digo|bairros', c_clean): mapping['Barcode'] = df_file[col]
-            elif re.search(r'est|stock', c_clean): mapping['Stock'] = df_file[col]
-            elif re.search(r'caix', c_clean): mapping['caixa'] = df_file[col]
-            elif re.search(r'quan', c_clean): mapping['QUANT'] = df_file[col]
-
-        # Reconstrói um DataFrame temporário garantindo que todas as chaves existam com dados válidos
+        # Mapeamento absoluto baseado na ordem imutável fornecida por você:
+        # 0: descricao, 1: codigo barras, 2: preco, 3: estoque, 4: caixa, 5: quant
         df_novo = pd.DataFrame()
-        df_novo['Description'] = mapping.get('Description', pd.Series([""] * len(df_file)))
-        df_novo['Barcode'] = mapping.get('Barcode', pd.Series([""] * len(df_file)))
-        df_novo['Stock'] = mapping.get('Stock', pd.Series([0] * len(df_file)))
-        df_novo['caixa'] = mapping.get('caixa', pd.Series([0.0] * len(df_file)))
-        df_novo['QUANT'] = mapping.get('QUANT', pd.Series([1] * len(df_file)))
+        df_novo['Description'] = df_file.iloc[:, 0] if len(df_file.columns) > 0 else ""
+        df_novo['Barcode'] = df_file.iloc[:, 1] if len(df_file.columns) > 1 else ""
+        df_novo['Price'] = df_file.iloc[:, 2] if len(df_file.columns) > 2 else 0.0
+        df_novo['Stock'] = df_file.iloc[:, 3] if len(df_file.columns) > 3 else 0
+        df_novo['caixa'] = df_file.iloc[:, 4] if len(df_file.columns) > 4 else 0.0
+        df_novo['QUANT'] = df_file.iloc[:, 5] if len(df_file.columns) > 5 else 1
 
         df_antigo = get_master_db()
         
@@ -332,7 +324,7 @@ elif aba == "⚙️ Gerenciar Banco":
         if not df_antigo.empty:
             antigo_dict = dict(zip(df_antigo['Barcode'].astype(str), df_antigo['QUANT']))
             
-        # LOOP ORIGINAL INTEGRAL - Executa com segurança total agora
+        # LOOP ORIGINAL INTEGRAL - Agora executado por chaves estáticas e indexadas de forma limpa
         for idx, row in df_novo.iterrows():
             raw_desc = row['Description']
             raw_barcode = row['Barcode']
