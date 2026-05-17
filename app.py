@@ -14,7 +14,7 @@ from streamlit.components.v1 import html
 # --- CONFIGURAÇÃO E PERSISTÊNCIA ---
 st.set_page_config(page_title="Automatizador de Preços PRO", layout="wide")
 
-# --- INJEÇÃO DE JAVASCRIPT (F1 E F5 - LIMPA SÓ O CAMPO SEM RESETAR) ---
+# --- INJEÇÃO DE JAVASCRIPT ---
 js_shortcuts = """
 <script>
     const doc = window.parent.document;
@@ -124,13 +124,7 @@ if aba == "📊 Cotação":
     if master_db.empty: st.warning("Banco vazio.")
     
     st.sidebar.header("Configurações")
-    ativar_similaridade = st.sidebar.toggle("Ativar Busca por Similaridade", value=True)
-    if ativar_similaridade:
-        modo = st.sidebar.selectbox("Regra de Busca:", ["Híbrido (Barras + Similaridade)", "Apenas Similaridade"])
-    else:
-        modo = "Apenas Barras"
-        st.sidebar.info("Busca estrita por Código de Barras ativada.")
-        
+    modo = st.sidebar.selectbox("Regra de Busca:", ["Híbrido (Barras + Similaridade)", "Apenas Barras", "Apenas Similaridade"])
     ignorar_01 = st.sidebar.checkbox("Ignorar 0 ou 1 à esquerda no EAN", value=False)
     estoque_minimo = st.sidebar.number_input("Estoque mínimo para Barras:", min_value=0, value=1)
     discount = st.sidebar.number_input("Desconto (%)", 0.0)
@@ -188,6 +182,7 @@ if aba == "📊 Cotação":
                                     found_p = p_val
                                     break
                             elif ignorar_01:
+                                # CORREÇÃO: Chamando o nome correto da sua função original
                                 b_limpo = clean_barcode_prefix(b)
                                 if b_limpo in product_map:
                                     p_val, s_val = product_map[b_limpo]
@@ -302,27 +297,24 @@ elif aba == "💰 Vendas":
         else:
             st.info("Carrinho vazio.")
 
-# --- ABA 3: GERENCIAR BANCO (CORRIGIDA INTEGRALMENTE CONFORME ESTRUTURA ORIGINAL) ---
+# --- ABA 3: GERENCIAR BANCO ---
 elif aba == "⚙️ Gerenciar Banco":
     st.title("⚙️ Gerenciar Banco")
     f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
     if f and st.button("💾 Salvar Banco"):
         df_novo = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
         
-        # Garante a remoção de espaços em branco nos nomes das colunas vindas do arquivo
         df_novo.columns = [str(c).strip() for c in df_novo.columns]
         
-        # MAPEAMENTO RIGOROSO DOS NOMES REAIS DA PLANILHA PARA A EXIGÊNCIA DO SEU SISTEMA ORIGINAL
         mapeamento_colunas = {
             'descrição': 'Description',
             'codigo barras': 'Barcode',
             'preço': 'Price',
             'estoque': 'Stock',
             'caixa': 'caixa',
-            'QUANT': 'QUANT'
+            'QUANT': 'QUANT',
+            'quant': 'QUANT'
         }
-        
-        # Renomeia dinamicamente apenas as colunas que casarem com a sua tabela original
         df_novo.rename(columns=mapeamento_colunas, inplace=True)
         
         df_antigo = get_master_db()
@@ -337,25 +329,21 @@ elif aba == "⚙️ Gerenciar Banco":
             antigo_dict = dict(zip(df_antigo['Barcode'].astype(str), df_antigo['QUANT']))
             
         for idx, row in df_novo.iterrows():
-            # Extração segura e padronizada das colunas renomeadas
             raw_desc = row['Description'] if 'Description' in df_novo.columns else ""
             raw_barcode = row['Barcode'] if 'Barcode' in df_novo.columns else ""
             raw_stock = row['Stock'] if 'Stock' in df_novo.columns else 0
             raw_caixa = row['caixa'] if 'caixa' in df_novo.columns else 0.0
             raw_quant = row['QUANT'] if 'QUANT' in df_novo.columns else 1
             
-            # Limpeza original do código de barras
             barcode_str = re.sub(r'\D', '', str(raw_barcode).split('.')[0])
             if not barcode_str: continue
             
-            # REGRA MANTIDA: Preserva o fator QUANT antigo. Se for produto novo, adota o do arquivo enviado.
             if barcode_str in antigo_dict:
                 quant_final = antigo_dict[barcode_str]
             else:
                 quant_final = raw_quant
                 
             divisor = get_num_only(quant_final)
-            
             nova_caixa = pd.to_numeric(raw_caixa, errors='coerce')
             nova_caixa = float(nova_caixa) if not pd.isna(nova_caixa) else 0.0
             preco_calculado = nova_caixa / divisor if divisor > 0 else 0.0
@@ -372,7 +360,7 @@ elif aba == "⚙️ Gerenciar Banco":
         df_resultado = pd.DataFrame(lista_final)
         df_resultado.to_csv(DB_STORAGE, index=False)
         st.cache_data.clear()
-        st.success("Banco Atualizado! Sincronização realizada com preservação de fatores QUANT antigos.")
+        st.success("Banco Updated com Sucesso!")
         st.dataframe(df_resultado.head())
 
 # --- ABA 4: USUÁRIOS ---
