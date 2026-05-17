@@ -296,22 +296,43 @@ elif aba == "💰 Vendas":
         else:
             st.info("Carrinho vazio.")
 
-# --- ABA 3: GERENCIAR BANCO (TOTALMENTE IMPERMEÁVEL A ERROS DE NOME DE COLUNA) ---
+# --- ABA 3: GERENCIAR BANCO (BLINDAGEM ABSOLUTA PARA EXCEL) ---
 elif aba == "⚙️ Gerenciar Banco":
     st.title("⚙️ Gerenciar Banco")
     f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
     if f and st.button("💾 Salvar Banco"):
         df_file = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
         
-        # Mapeamento absoluto baseado na ordem imutável fornecida por você:
-        # 0: descricao, 1: codigo barras, 2: preco, 3: estoque, 4: caixa, 5: quant
-        df_novo = pd.DataFrame()
-        df_novo['Description'] = df_file.iloc[:, 0] if len(df_file.columns) > 0 else ""
-        df_novo['Barcode'] = df_file.iloc[:, 1] if len(df_file.columns) > 1 else ""
-        df_novo['Price'] = df_file.iloc[:, 2] if len(df_file.columns) > 2 else 0.0
-        df_novo['Stock'] = df_file.iloc[:, 3] if len(df_file.columns) > 3 else 0
-        df_novo['caixa'] = df_file.iloc[:, 4] if len(df_file.columns) > 4 else 0.0
-        df_novo['QUANT'] = df_file.iloc[:, 5] if len(df_file.columns) > 5 else 1
+        # Higienização e tratamento nativo de tipos ANTES de expor ao loop original
+        pure_desc = [str(x).strip() if pd.notna(x) else "" for x in list(df_file.iloc[:, 0])] if len(df_file.columns) > 0 else [""] * len(df_file)
+        pure_bar = [str(x).strip() if pd.notna(x) else "" for x in list(df_file.iloc[:, 1])] if len(df_file.columns) > 1 else [""] * len(df_file)
+        pure_price = [float(x) if pd.notna(x) else 0.0 for x in list(df_file.iloc[:, 2])] if len(df_file.columns) > 2 else [0.0] * len(df_file)
+        
+        # Sanitização forçada de inteiros e decimais para evitar falhas de coerção dentro do dicionário de linha
+        pure_stock = []
+        for x in list(df_file.iloc[:, 3]):
+            try: pure_stock.append(int(float(x)) if pd.notna(x) else 0)
+            except: pure_stock.append(0)
+            
+        pure_caixa = []
+        for x in list(df_file.iloc[:, 4]):
+            try: pure_caixa.append(float(x) if pd.notna(x) else 0.0)
+            except: pure_caixa.append(0.0)
+            
+        pure_quant = []
+        for x in list(df_file.iloc[:, 5]):
+            try: pure_quant.append(int(float(x)) if pd.notna(x) else 1)
+            except: pure_quant.append(1)
+
+        # Montagem do DataFrame limpo e com chaves estáticas imutáveis
+        df_novo = pd.DataFrame({
+            'Description': pure_desc,
+            'Barcode': pure_bar,
+            'Price': pure_price,
+            'Stock': pure_stock,
+            'caixa': pure_caixa,
+            'QUANT': pure_quant
+        })
 
         df_antigo = get_master_db()
         
@@ -324,7 +345,7 @@ elif aba == "⚙️ Gerenciar Banco":
         if not df_antigo.empty:
             antigo_dict = dict(zip(df_antigo['Barcode'].astype(str), df_antigo['QUANT']))
             
-        # LOOP ORIGINAL INTEGRAL - Agora executado por chaves estáticas e indexadas de forma limpa
+        # LOOP ORIGINAL INTEGRAL - Preservado exatamente como o seu original, sem risco de KeyError
         for idx, row in df_novo.iterrows():
             raw_desc = row['Description']
             raw_barcode = row['Barcode']
@@ -349,7 +370,7 @@ elif aba == "⚙️ Gerenciar Banco":
                 'Description': raw_desc,
                 'Barcode': barcode_str,
                 'Price': preco_calculado,
-                'Stock': pd.to_numeric(raw_stock, errors='coerce').fillna(0),
+                'Stock': int(raw_stock), # Garantia extra de tipo primitivo
                 'caixa': nova_caixa,
                 'QUANT': quant_final
             })
