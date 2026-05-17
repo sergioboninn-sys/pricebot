@@ -182,7 +182,6 @@ if aba == "📊 Cotação":
                                     found_p = p_val
                                     break
                             elif ignorar_01:
-                                # CORREÇÃO: Chamando o nome correto da sua função original
                                 b_limpo = clean_barcode_prefix(b)
                                 if b_limpo in product_map:
                                     p_val, s_val = product_map[b_limpo]
@@ -304,19 +303,16 @@ elif aba == "⚙️ Gerenciar Banco":
     if f and st.button("💾 Salvar Banco"):
         df_novo = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
         
-        df_novo.columns = [str(c).strip() for c in df_novo.columns]
+        # Cria uma lista limpa das colunas existentes em minúsculo para mapeamento dinâmico
+        cols_originais = [str(c).strip().lower() for c in df_novo.columns]
         
-        mapeamento_colunas = {
-            'descrição': 'Description',
-            'codigo barras': 'Barcode',
-            'preço': 'Price',
-            'estoque': 'Stock',
-            'caixa': 'caixa',
-            'QUANT': 'QUANT',
-            'quant': 'QUANT'
-        }
-        df_novo.rename(columns=mapeamento_colunas, inplace=True)
-        
+        # Mapeia dinamicamente a posição exata das colunas por aproximação de string
+        c_desc_name = df_novo.columns[cols_originais.index('descrição')] if 'descrição' in cols_originais else df_novo.columns[0]
+        c_bar_name = df_novo.columns[cols_originais.index('codigo barras')] if 'codigo barras' in cols_originais else df_novo.columns[1]
+        c_stock_name = df_novo.columns[cols_originais.index('estoque')] if 'estoque' in cols_originais else (df_novo.columns[3] if len(df_novo.columns) > 3 else df_novo.columns[0])
+        c_caixa_name = df_novo.columns[cols_originais.index('caixa')] if 'caixa' in cols_originais else (df_novo.columns[4] if len(df_novo.columns) > 4 else df_novo.columns[0])
+        c_quant_name = df_novo.columns[cols_originais.index('quant')] if 'quant' in cols_originais else (df_novo.columns[5] if len(df_novo.columns) > 5 else df_novo.columns[0])
+
         df_antigo = get_master_db()
         
         def get_num_only(v):
@@ -329,11 +325,11 @@ elif aba == "⚙️ Gerenciar Banco":
             antigo_dict = dict(zip(df_antigo['Barcode'].astype(str), df_antigo['QUANT']))
             
         for idx, row in df_novo.iterrows():
-            raw_desc = row['Description'] if 'Description' in df_novo.columns else ""
-            raw_barcode = row['Barcode'] if 'Barcode' in df_novo.columns else ""
-            raw_stock = row['Stock'] if 'Stock' in df_novo.columns else 0
-            raw_caixa = row['caixa'] if 'caixa' in df_novo.columns else 0.0
-            raw_quant = row['QUANT'] if 'QUANT' in df_novo.columns else 1
+            raw_desc = row[c_desc_name] if c_desc_name in df_novo.columns else ""
+            raw_barcode = row[c_bar_name] if c_bar_name in df_novo.columns else ""
+            raw_stock = row[c_stock_name] if c_stock_name in df_novo.columns else 0
+            raw_caixa = row[c_caixa_name] if c_caixa_name in df_novo.columns else 0.0
+            raw_quant = row[c_quant_name] if c_quant_name in df_novo.columns else 1
             
             barcode_str = re.sub(r'\D', '', str(raw_barcode).split('.')[0])
             if not barcode_str: continue
@@ -360,7 +356,7 @@ elif aba == "⚙️ Gerenciar Banco":
         df_resultado = pd.DataFrame(lista_final)
         df_resultado.to_csv(DB_STORAGE, index=False)
         st.cache_data.clear()
-        st.success("Banco Updated com Sucesso!")
+        st.success("Banco Atualizado com Sucesso!")
         st.dataframe(df_resultado.head())
 
 # --- ABA 4: USUÁRIOS ---
