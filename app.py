@@ -297,49 +297,43 @@ elif aba == "💰 Vendas":
         else:
             st.info("Carrinho vazio.")
 
-# --- ABA 3: GERENCIAR BANCO (MANTENDO QUANT ANTIGO E CALCULANDO NOVO PREÇO) ---
+# --- ABA 3: GERENCIAR BANCO (CORRIGIDO MAPEAMENTO DE CAIXA/QUANT) ---
 elif aba == "⚙️ Gerenciar Banco":
     st.title("⚙️ Gerenciar Banco")
     f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
     if f and st.button("💾 Salvar Banco"):
-        # 1. Carrega o novo arquivo enviado pelo usuário
         df_novo = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
         df_novo = df_novo.iloc[:, [0, 1, 2, 3, 4, 5]]
         df_novo.columns = ['Description', 'Barcode', 'Price', 'Stock', 'caixa', 'QUANT']
         df_novo['Barcode'] = df_novo['Barcode'].apply(lambda x: re.sub(r'\D', '', str(x).split('.')[0]))
         
-        # Carrega o banco existente de forma temporária para fazer o cruzamento
         df_antigo = get_master_db()
         
-        # Função para pegar apenas o número contido em QUANT
         def get_num_only(v):
             m = re.search(r'\d+', str(v))
             return int(m.group()) if m else 1
 
         lista_final = []
-        
-        # Mapeia o banco antigo por código de barras para checar se o produto já existia
         antigo_dict = {}
         if not df_antigo.empty:
             antigo_dict = dict(zip(df_antigo['Barcode'].astype(str), df_antigo['QUANT']))
             
-        # 2. Executa a regra cirúrgica de mesclagem item por item do novo arquivo
         for _, row in df_novo.iterrows():
             barcode_str = str(row['Barcode'])
-            nova_caixa = pd.to_numeric(row['caixa'], errors='coerce').fillna(0)
+            nova_caixa = pd.to_numeric(row['caixa'], errors='coerce')
+            if pd.isna(nova_caixa):
+                nova_caixa = 0.0
+            else:
+                nova_caixa = float(nova_caixa)
             
             if barcode_str in antigo_dict:
-                # PRODUTO JÁ EXISTE: Preserva a QUANT antiga e descarta a nova QUANT
                 quant_final = antigo_dict[barcode_str]
             else:
-                # PRODUTO NOVO: Aceita a QUANT vinda do novo arquivo
                 quant_final = row['QUANT']
                 
-            # Extrai o fator numérico correspondente à QUANT definida acima
             divisor = get_num_only(quant_final)
-            preco_calculado = nova_caixa / divisor if divisor > 0 else 0
+            preco_calculado = nova_caixa / divisor if divisor > 0 else 0.0
             
-            # Monta a estrutura da linha com a regra solicitada
             lista_final.append({
                 'Description': row['Description'],
                 'Barcode': row['Barcode'],
@@ -349,7 +343,6 @@ elif aba == "⚙️ Gerenciar Banco":
                 'QUANT': quant_final
             })
             
-        # Converte a lista final de volta para DataFrame e salva permanentemente no CSV
         df_resultado = pd.DataFrame(lista_final)
         df_resultado.to_csv(DB_STORAGE, index=False)
         st.cache_data.clear()
