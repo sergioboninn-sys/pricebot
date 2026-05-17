@@ -14,7 +14,7 @@ from streamlit.components.v1 import html
 # --- CONFIGURAÇÃO E PERSISTÊNCIA ---
 st.set_page_config(page_title="Automatizador de Preços PRO", layout="wide")
 
-# --- INJEÇÃO DE JAVASCRIPT (F1 E F5) ---
+# --- INJEÇÃO DE JAVASCRIPT (F1 E F5 CORRIGIDO PARA NÃO RESETAR A PÁGINA) ---
 js_shortcuts = """
 <script>
     const doc = window.parent.document;
@@ -124,7 +124,15 @@ if aba == "📊 Cotação":
     if master_db.empty: st.warning("Banco vazio.")
     
     st.sidebar.header("Configurações")
-    modo = st.sidebar.selectbox("Regra de Busca:", ["Híbrido (Barras + Similaridade)", "Apenas Barras", "Apenas Similaridade"])
+    
+    # Botão intuitivo/Toggle para ativar/desativar a busca por similaridade de texto
+    ativar_similaridade = st.sidebar.toggle("Ativar Busca por Similaridade", value=True)
+    if ativar_similaridade:
+        modo = st.sidebar.selectbox("Regra de Busca:", ["Híbrido (Barras + Similaridade)", "Apenas Similaridade"])
+    else:
+        modo = "Apenas Barras"
+        st.sidebar.info("Busca estrita por Código de Barras ativada.")
+        
     ignorar_01 = st.sidebar.checkbox("Ignorar 0 ou 1 à esquerda no EAN", value=False)
     estoque_minimo = st.sidebar.number_input("Estoque mínimo para Barras:", min_value=0, value=1)
     discount = st.sidebar.number_input("Desconto (%)", 0.0)
@@ -133,8 +141,7 @@ if aba == "📊 Cotação":
     st.sidebar.subheader("Opções de Download")
     opcao_salvamento = st.sidebar.radio(
         "Como deseja baixar o resultado?",
-        ["Novo Arquivo (cotacao_corrigida.xlsx)", "Mesmo nome do arquivo original"],
-        help="Esta opção define apenas o nome do arquivo baixado. A formatação original será mantida em ambos os casos."
+        ["Novo Arquivo (cotacao_corrigida.xlsx)", "Mesmo nome do arquivo original"]
     )
 
     target_file = st.file_uploader("Planilha de Destino", type=["xlsx"])
@@ -175,6 +182,7 @@ if aba == "📊 Cotação":
                     b_val = ws.cell(row=r, column=b_idx).value
                     
                     if "Barras" in modo or "Híbrido" in modo:
+                        # Mantida exatamente a regra original estrita de códigos de barra
                         barcodes = extract_all_barcodes(b_val)
                         for b in barcodes:
                             if b in product_map:
@@ -297,15 +305,18 @@ elif aba == "💰 Vendas":
         else:
             st.info("Carrinho vazio.")
 
-# --- ABA 3: GERENCIAR BANCO (MAPEADO DIRETAMENTE PELO NOME DOS CABEÇALHOS REAIS) ---
+# --- ABA 3: GERENCIAR BANCO (BLINDADO VIA DICIONÁRIO NATIVO CONTRA ATTRIBUTERROR) ---
 elif aba == "⚙️ Gerenciar Banco":
     st.title("⚙️ Gerenciar Banco")
     f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
     if f and st.button("💾 Salvar Banco"):
-        df_novo = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
+        df_raw = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
         
-        # Remove espaços em branco das colunas para evitar descompassos
-        df_novo.columns = [str(c).strip() for c in df_novo.columns]
+        # Limpeza e normalização forçada das chaves das colunas
+        df_raw.columns = [str(c).strip() for c in df_raw.columns]
+        
+        # Conversão direta para dicionários nativos Python para anular o erro AttributeError do iterador Pandas
+        dados_lista = df_raw.to_dict('records')
         
         df_antigo = get_master_db()
         
@@ -318,14 +329,15 @@ elif aba == "⚙️ Gerenciar Banco":
         if not df_antigo.empty:
             antigo_dict = dict(zip(df_antigo['Barcode'].astype(str), df_antigo['QUANT']))
             
-        for idx, row in df_novo.iterrows():
-            # Busca cirúrgica pelos nomes exatos das colunas da sua planilha original
-            raw_desc = row['descrição'] if 'descrição' in df_novo.columns else ""
-            raw_barcode = row['codigo barras'] if 'codigo barras' in df_novo.columns else ""
-            raw_stock = row['estoque'] if 'estoque' in df_novo.columns else 0
-            raw_caixa = row['caixa'] if 'caixa' in df_novo.columns else 0.0
-            raw_quant = row['QUANT'] if 'QUANT' in df_novo.columns else 1
+        for row in dados_lista:
+            # Captura segura usando as chaves exatas mapeadas da planilha
+            raw_desc = row.get('descrição', '')
+            raw_barcode = row.get('codigo barras', '')
+            raw_stock = row.get('estoque', 0)
+            raw_caixa = row.get('caixa', 0.0)
+            raw_quant = row.get('QUANT', 1)
             
+            # Executa a limpeza idêntica e precisa do código de barras
             barcode_str = re.sub(r'\D', '', str(raw_barcode).split('.')[0])
             
             nova_caixa = pd.to_numeric(raw_caixa, errors='coerce')
@@ -351,7 +363,7 @@ elif aba == "⚙️ Gerenciar Banco":
         df_resultado = pd.DataFrame(lista_final)
         df_resultado.to_csv(DB_STORAGE, index=False)
         st.cache_data.clear()
-        st.success("Banco Atualizado! Coluna QUANT de produtos antigos preservada e novos preços calculados.")
+        st.success("Banco Atualizado com Sucesso! Estrutura blindada e cálculos atualizados.")
         st.dataframe(df_resultado.head())
 
 # --- ABA 4: USUÁRIOS ---
