@@ -124,8 +124,6 @@ if aba == "📊 Cotação":
     if master_db.empty: st.warning("Banco vazio.")
     
     st.sidebar.header("Configurações")
-    
-    # Botão intuitivo/Toggle para ativar/desativar a busca por similaridade de texto
     ativar_similaridade = st.sidebar.toggle("Ativar Busca por Similaridade", value=True)
     if ativar_similaridade:
         modo = st.sidebar.selectbox("Regra de Busca:", ["Híbrido (Barras + Similaridade)", "Apenas Similaridade"])
@@ -182,7 +180,6 @@ if aba == "📊 Cotação":
                     b_val = ws.cell(row=r, column=b_idx).value
                     
                     if "Barras" in modo or "Híbrido" in modo:
-                        # Mantida exatamente a regra original estrita de códigos de barra
                         barcodes = extract_all_barcodes(b_val)
                         for b in barcodes:
                             if b in product_map:
@@ -305,18 +302,15 @@ elif aba == "💰 Vendas":
         else:
             st.info("Carrinho vazio.")
 
-# --- ABA 3: GERENCIAR BANCO (BLINDADO VIA DICIONÁRIO NATIVO CONTRA ATTRIBUTERROR) ---
+# --- ABA 3: GERENCIAR BANCO (RESOLVIDO DE FORMA SIMPLES E DIRETA) ---
 elif aba == "⚙️ Gerenciar Banco":
     st.title("⚙️ Gerenciar Banco")
     f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
     if f and st.button("💾 Salvar Banco"):
-        df_raw = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
+        df_input = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
         
-        # Limpeza e normalização forçada das chaves das colunas
-        df_raw.columns = [str(c).strip() for c in df_raw.columns]
-        
-        # Conversão direta para dicionários nativos Python para anular o erro AttributeError do iterador Pandas
-        dados_lista = df_raw.to_dict('records')
+        # Deixa todos os nomes de colunas da planilha em letras minúsculas e sem espaços
+        df_input.columns = [str(c).strip().lower() for c in df_input.columns]
         
         df_antigo = get_master_db()
         
@@ -324,46 +318,52 @@ elif aba == "⚙️ Gerenciar Banco":
             m = re.search(r'\d+', str(v))
             return int(m.group()) if m else 1
 
-        lista_final = []
+        # Mapeia os fatores QUANT já existentes para não perdê-los
         antigo_dict = {}
         if not df_antigo.empty:
             antigo_dict = dict(zip(df_antigo['Barcode'].astype(str), df_antigo['QUANT']))
             
-        for row in dados_lista:
-            # Captura segura usando as chaves exatas mapeadas da planilha
+        lista_final = []
+        
+        # Faz a iteração simples padrão linha por linha
+        for idx, row in df_input.iterrows():
+            # Pega as informações de forma limpa usando letras minúsculas
             raw_desc = row.get('descrição', '')
             raw_barcode = row.get('codigo barras', '')
             raw_stock = row.get('estoque', 0)
             raw_caixa = row.get('caixa', 0.0)
-            raw_quant = row.get('QUANT', 1)
+            raw_quant = row.get('quant', 1)
             
-            # Executa a limpeza idêntica e precisa do código de barras
+            # Limpa o formato do código de barras
             barcode_str = re.sub(r'\D', '', str(raw_barcode).split('.')[0])
+            if not barcode_str: continue
             
-            nova_caixa = pd.to_numeric(raw_caixa, errors='coerce')
-            nova_caixa = float(nova_caixa) if not pd.isna(nova_caixa) else 0.0
-            
+            # REGRA PEDIDA: Preserva a QUANT do banco antigo, se for novo usa a da planilha
             if barcode_str in antigo_dict:
                 quant_final = antigo_dict[barcode_str]
             else:
                 quant_final = raw_quant
                 
+            # Calcula o preço correto baseado no fator de divisão
             divisor = get_num_only(quant_final)
-            preco_calculado = nova_caixa / divisor if divisor > 0 else 0.0
+            v_caixa = pd.to_numeric(raw_caixa, errors='coerce')
+            v_caixa = float(v_caixa) if not pd.isna(v_caixa) else 0.0
+            preco_calculado = v_caixa / divisor if divisor > 0 else 0.0
             
+            # Salva no formato padrão oficial esperado pelo sistema
             lista_final.append({
                 'Description': raw_desc,
                 'Barcode': barcode_str,
                 'Price': preco_calculado,
                 'Stock': pd.to_numeric(raw_stock, errors='coerce').fillna(0),
-                'caixa': nova_caixa,
+                'caixa': v_caixa,
                 'QUANT': quant_final
             })
             
         df_resultado = pd.DataFrame(lista_final)
         df_resultado.to_csv(DB_STORAGE, index=False)
         st.cache_data.clear()
-        st.success("Banco Atualizado com Sucesso! Estrutura blindada e cálculos atualizados.")
+        st.success("Banco Atualizado com Sucesso!")
         st.dataframe(df_resultado.head())
 
 # --- ABA 4: USUÁRIOS ---
