@@ -52,11 +52,27 @@ if 'replicar_data' not in st.session_state:
 
 def load_users():
     if not os.path.exists(USERS_STORAGE):
-        return {"admin": {"password": "admin123", "expiry": "2099-12-31", "role": "admin"}}
-    with open(USERS_STORAGE, "r") as f: return json.load(f)
+        return {
+            "admin": {
+                "password": "admin123", 
+                "expiry": "2099-12-31", 
+                "role": "admin",
+                "permissions": {
+                    "ver_estoque": True,
+                    "ver_preco": True,
+                    "ver_caixa": True,
+                    "ver_quant": True,
+                    "funcao_cotacao": True,
+                    "funcao_vendas": True
+                }
+            }
+        }
+    with open(USERS_STORAGE, "r") as f: 
+        return json.load(f)
 
 def save_users(users):
-    with open(USERS_STORAGE, "w") as f: json.dump(users, f)
+    with open(USERS_STORAGE, "w") as f: 
+        json.dump(users, f, indent=4)
 
 # --- LOGIN ---
 if 'autenticado' not in st.session_state:
@@ -73,6 +89,7 @@ def login():
             if datetime.now() <= exp:
                 st.session_state.autenticado = True
                 st.session_state.user_role = users[u]['role']
+                st.session_state.username = u
                 st.rerun()
         st.sidebar.error("Acesso negado")
 
@@ -296,19 +313,17 @@ elif aba == "💰 Vendas":
         else:
             st.info("Carrinho vazio.")
 
-# --- ABA 3: GERENCIAR BANCO (BLINDAGEM ABSOLUTA PARA EXCEL) ---
+# --- ABA 3: GERENCIAR BANCO ---
 elif aba == "⚙️ Gerenciar Banco":
     st.title("⚙️ Gerenciar Banco")
     f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
     if f and st.button("💾 Salvar Banco"):
         df_file = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
         
-        # Higienização e tratamento nativo de tipos ANTES de expor ao loop original
         pure_desc = [str(x).strip() if pd.notna(x) else "" for x in list(df_file.iloc[:, 0])] if len(df_file.columns) > 0 else [""] * len(df_file)
         pure_bar = [str(x).strip() if pd.notna(x) else "" for x in list(df_file.iloc[:, 1])] if len(df_file.columns) > 1 else [""] * len(df_file)
         pure_price = [float(x) if pd.notna(x) else 0.0 for x in list(df_file.iloc[:, 2])] if len(df_file.columns) > 2 else [0.0] * len(df_file)
         
-        # Sanitização forçada de inteiros e decimais para evitar falhas de coerção dentro do dicionário de linha
         pure_stock = []
         for x in list(df_file.iloc[:, 3]):
             try: pure_stock.append(int(float(x)) if pd.notna(x) else 0)
@@ -324,7 +339,6 @@ elif aba == "⚙️ Gerenciar Banco":
             try: pure_quant.append(int(float(x)) if pd.notna(x) else 1)
             except: pure_quant.append(1)
 
-        # Montagem do DataFrame limpo e com chaves estáticas imutáveis
         df_novo = pd.DataFrame({
             'Description': pure_desc,
             'Barcode': pure_bar,
@@ -345,7 +359,6 @@ elif aba == "⚙️ Gerenciar Banco":
         if not df_antigo.empty:
             antigo_dict = dict(zip(df_antigo['Barcode'].astype(str), df_antigo['QUANT']))
             
-        # LOOP ORIGINAL INTEGRAL - Preservado exatamente como o seu original, sem risco de KeyError
         for idx, row in df_novo.iterrows():
             raw_desc = row['Description']
             raw_barcode = row['Barcode']
@@ -370,7 +383,7 @@ elif aba == "⚙️ Gerenciar Banco":
                 'Description': raw_desc,
                 'Barcode': barcode_str,
                 'Price': preco_calculado,
-                'Stock': int(raw_stock), # Garantia extra de tipo primitivo
+                'Stock': int(raw_stock),
                 'caixa': nova_caixa,
                 'QUANT': quant_final
             })
@@ -378,13 +391,14 @@ elif aba == "⚙️ Gerenciar Banco":
         df_resultado = pd.DataFrame(lista_final)
         df_resultado.to_csv(DB_STORAGE, index=False)
         st.cache_data.clear()
-        st.success("Banco Atualizado com Sucesso!")
+        st.success("Banco Updated!")
         st.dataframe(df_resultado.head())
 
-# --- ABA 4: USUÁRIOS ---
+# --- ABA 4: USUÁRIOS (COM A NOVA MATRIZ DE PERMISSÕES INDIVIDUAL) ---
 elif aba == "👤 Usuários":
-    st.title("👤 Gestão de Usuários")
+    st.title("👤 Gestão de Usuários e Permissões")
     users = load_users()
+    
     c_b1, c_b2 = st.columns(2)
     with c_b1:
         df_u = pd.DataFrame.from_dict(users, orient='index').reset_index()
@@ -393,25 +407,96 @@ elif aba == "👤 Usuários":
         up_b = st.file_uploader("Restore Usuários", type=["csv"])
         if up_b and st.button("🔥 Restaurar"):
             df_r = pd.read_csv(up_b)
-            new_u = {str(r['index']): {"password": str(r['password']), "expiry": str(r['expiry']), "role": str(r['role'])} for _, r in df_r.iterrows()}
-            save_users(new_u); st.rerun()
+            new_u = {}
+            for _, r in df_r.iterrows():
+                # Tenta recuperar permissões antigas se existirem no backup
+                try: perm = json.loads(r['permissions'].replace("'", '"'))
+                except: perm = {"ver_estoque": True, "ver_preco": True, "ver_caixa": True, "ver_quant": True, "funcao_cotacao": True, "funcao_vendas": True}
+                new_u[str(r['index'])] = {"password": str(r['password']), "expiry": str(r['expiry']), "role": str(r['role']), "permissions": perm}
+            save_users(new_u)
+            st.rerun()
+            
     st.divider()
     col_n, col_e = st.columns(2)
+    
     with col_n:
-        st.subheader("➕ Novo")
-        with st.form("Novo"):
-            nu, np, nd = st.text_input("Usuário"), st.text_input("Senha"), st.number_input("Validade (dias)", 1, 365, 30)
-            if st.form_submit_button("Criar"):
-                users[nu] = {"password": np, "expiry": (datetime.now()+timedelta(days=nd)).strftime("%Y-%m-%d"), "role": "user"}
-                save_users(users); st.rerun()
+        st.subheader("➕ Criar Novo Usuário")
+        with st.form("Novo_Form"):
+            nu = st.text_input("Nome do Usuário")
+            np = st.text_input("Senha de Acesso")
+            nd = st.number_input("Validade da Conta (dias)", 1, 365, 30)
+            
+            st.markdown("---")
+            st.write("📋 **Permissões do Novo Usuário:**")
+            p_estoque = st.checkbox("Acesso à Coluna: Estoque", value=True)
+            p_preco = st.checkbox("Acesso à Coluna: Preço", value=True)
+            p_caixa = st.checkbox("Acesso à Coluna: Caixa", value=True)
+            p_quant = st.checkbox("Acesso à Coluna: Quantidade (Família)", value=True)
+            p_cotacao = st.checkbox("Permitir Função: Processar Cotações", value=True)
+            p_vendas = st.checkbox("Permitir Função: Consulta de Vendas / Pedido", value=True)
+            
+            if st.form_submit_button("Criar Usuário com Permissões"):
+                if nu and np:
+                    users[nu] = {
+                        "password": np,
+                        "expiry": (datetime.now() + timedelta(days=nd)).strftime("%Y-%m-%d"),
+                        "role": "user",
+                        "permissions": {
+                            "ver_estoque": p_estoque,
+                            "ver_preco": p_preco,
+                            "ver_caixa": p_caixa,
+                            "ver_quant": p_quant,
+                            "funcao_cotacao": p_cotacao,
+                            "funcao_vendas": p_vendas
+                        }
+                    }
+                    save_users(users)
+                    st.success(f"Usuário {nu} criado com sucesso!")
+                    st.rerun()
+                else:
+                    st.error("Preencha o Usuário e Senha!")
+
     with col_e:
-        st.subheader("📝 Editar")
-        u_sel = st.selectbox("Usuário", list(users.keys()))
+        st.subheader("📝 Editar Usuário Existente")
+        u_sel = st.selectbox("Selecione o Usuário para Modificar", list(users.keys()))
         if u_sel:
-            ep = st.text_input("Senha", value=users[u_sel]["password"])
-            ex = st.text_input("Expiração", value=users[u_sel]["expiry"])
-            if st.button("Salvar"):
-                users[u_sel].update({"password": ep, "expiry": ex})
-                save_users(users); st.rerun()
-            if u_sel != "admin" and st.button("❌ Excluir"):
-                del users[u_sel]; save_users(users); st.rerun()
+            # Carrega permissões atuais ou define padrão se o usuário for herança antiga
+            current_perms = users[u_sel].get("permissions", {
+                "ver_estoque": True, "ver_preco": True, "ver_caixa": True, "ver_quant": True, "funcao_cotacao": True, "funcao_vendas": True
+            })
+            
+            ep = st.text_input("Senha Atual/Nova", value=users[u_sel]["password"])
+            ex = st.text_input("Data de Expiração (AAAA-MM-DD)", value=users[u_sel]["expiry"])
+            
+            st.markdown("---")
+            st.write(f"📋 **Modificar Permissões de '{u_sel}':**")
+            
+            # Lista de caixas de seleção preenchidas com os valores salvos no banco
+            up_estoque = st.checkbox("Acesso à Coluna: Estoque", value=current_perms.get("ver_estoque", True), key="e_est")
+            up_preco = st.checkbox("Acesso à Coluna: Preço", value=current_perms.get("ver_preco", True), key="e_prc")
+            up_caixa = st.checkbox("Acesso à Coluna: Caixa", value=current_perms.get("ver_caixa", True), key="e_cx")
+            up_quant = st.checkbox("Acesso à Coluna: Quantidade (Família)", value=current_perms.get("ver_quant", True), key="e_qnt")
+            up_cotacao = st.checkbox("Permitir Função: Processar Cotações", value=current_perms.get("funcao_cotacao", True), key="e_cot")
+            up_vendas = st.checkbox("Permitir Função: Consulta de Vendas / Pedido", value=current_perms.get("funcao_vendas", True), key="e_vnd")
+            
+            if st.button("Salvar Alterações do Usuário"):
+                users[u_sel].update({
+                    "password": ep,
+                    "expiry": ex,
+                    "permissions": {
+                        "ver_estoque": up_estoque,
+                        "ver_preco": up_preco,
+                        "ver_caixa": up_caixa,
+                        "ver_quant": up_quant,
+                        "funcao_cotacao": up_cotacao,
+                        "funcao_vendas": up_vendas
+                    }
+                })
+                save_users(users)
+                st.success(f"Permissões e dados de '{u_sel}' atualizados!")
+                st.rerun()
+                
+            if u_sel != "admin" and st.button("❌ Excluir Usuário permanentemente"):
+                del users[u_sel]
+                save_users(users)
+                st.rerun()
