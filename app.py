@@ -297,15 +297,13 @@ elif aba == "💰 Vendas":
         else:
             st.info("Carrinho vazio.")
 
-# --- ABA 3: GERENCIAR BANCO (CORRIGIDO MAPEAMENTO DE CAIXA/QUANT) ---
+# --- ABA 3: GERENCIAR BANCO (RESOLVIDO DEFINITIVAMENTE COM LEITURA POR ÍNDICE NUMÉRICO) ---
 elif aba == "⚙️ Gerenciar Banco":
     st.title("⚙️ Gerenciar Banco")
     f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
     if f and st.button("💾 Salvar Banco"):
         df_novo = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
         df_novo = df_novo.iloc[:, [0, 1, 2, 3, 4, 5]]
-        df_novo.columns = ['Description', 'Barcode', 'Price', 'Stock', 'caixa', 'QUANT']
-        df_novo['Barcode'] = df_novo['Barcode'].apply(lambda x: re.sub(r'\D', '', str(x).split('.')[0]))
         
         df_antigo = get_master_db()
         
@@ -318,27 +316,33 @@ elif aba == "⚙️ Gerenciar Banco":
         if not df_antigo.empty:
             antigo_dict = dict(zip(df_antigo['Barcode'].astype(str), df_antigo['QUANT']))
             
-        for _, row in df_novo.iterrows():
-            barcode_str = str(row['Barcode'])
-            nova_caixa = pd.to_numeric(row['caixa'], errors='coerce')
-            if pd.isna(nova_caixa):
-                nova_caixa = 0.0
-            else:
-                nova_caixa = float(nova_caixa)
+        for idx, row in df_novo.iterrows():
+            # Leitura direta por índice físico da coluna para evitar conflito de nomes (case sensitive)
+            raw_desc = row.iloc[0]
+            raw_barcode = row.iloc[1]
+            raw_price = row.iloc[2]
+            raw_stock = row.iloc[3]
+            raw_caixa = row.iloc[4]
+            raw_quant = row.iloc[5]
+            
+            barcode_str = re.sub(r'\D', '', str(raw_barcode).split('.')[0])
+            
+            nova_caixa = pd.to_numeric(raw_caixa, errors='coerce')
+            nova_caixa = float(nova_caixa) if not pd.isna(nova_caixa) else 0.0
             
             if barcode_str in antigo_dict:
                 quant_final = antigo_dict[barcode_str]
             else:
-                quant_final = row['QUANT']
+                quant_final = raw_quant
                 
             divisor = get_num_only(quant_final)
             preco_calculado = nova_caixa / divisor if divisor > 0 else 0.0
             
             lista_final.append({
-                'Description': row['Description'],
-                'Barcode': row['Barcode'],
+                'Description': raw_desc,
+                'Barcode': barcode_str,
                 'Price': preco_calculado,
-                'Stock': pd.to_numeric(row['Stock'], errors='coerce').fillna(0),
+                'Stock': pd.to_numeric(raw_stock, errors='coerce').fillna(0),
                 'caixa': nova_caixa,
                 'QUANT': quant_final
             })
