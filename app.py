@@ -63,7 +63,10 @@ def load_users():
                     "ver_caixa": True,
                     "ver_quant": True,
                     "funcao_cotacao": True,
-                    "funcao_vendas": True
+                    "funcao_vendas": True,
+                    "busca_hibrido": True,
+                    "busca_barras": True,
+                    "busca_similaridade": True
                 }
             }
         }
@@ -140,101 +143,120 @@ if aba == "📊 Cotação":
     master_db = get_master_db()
     if master_db.empty: st.warning("Banco vazio.")
     
+    # Resgate das permissões do usuário logado
+    users = load_users()
+    current_user_data = users.get(st.session_state.username, {})
+    current_perms = current_user_data.get("permissions", {})
+    
+    # Filtra as regras de busca permitidas para este usuário
+    modos_permitidos = []
+    if current_perms.get("busca_hibrido", True) or st.session_state.user_role == "admin":
+        modos_permitidos.append("Híbrido (Barras + Similaridade)")
+    if current_perms.get("busca_barras", True) or st.session_state.user_role == "admin":
+        modos_permitidos.append("Apenas Barras")
+    if current_perms.get("busca_similaridade", True) or st.session_state.user_role == "admin":
+        modos_permitidos.append("Apenas Similaridade")
+        
     st.sidebar.header("Configurações")
-    modo = st.sidebar.selectbox("Regra de Busca:", ["Híbrido (Barras + Similaridade)", "Apenas Barras", "Apenas Similaridade"])
-    ignorar_01 = st.sidebar.checkbox("Ignorar 0 ou 1 à esquerda no EAN", value=False)
-    estoque_minimo = st.sidebar.number_input("Estoque mínimo para Barras:", min_value=0, value=1)
-    discount = st.sidebar.number_input("Desconto (%)", 0.0)
-    aplicar_arredondamento = st.sidebar.checkbox("Arredondar preços", value=True)
+    
+    if modos_permitidos:
+        modo = st.sidebar.selectbox("Regra de Busca:", modos_permitidos)
+        
+        ignorar_01 = st.sidebar.checkbox("Ignorar 0 ou 1 à esquerda no EAN", value=False)
+        estoque_minimo = st.sidebar.number_input("Estoque mínimo para Barras:", min_value=0, value=1)
+        discount = st.sidebar.number_input("Desconto (%)", 0.0)
+        aplicar_arredondamento = st.sidebar.checkbox("Arredondar preços", value=True)
 
-    st.sidebar.subheader("Opções de Download")
-    opcao_salvamento = st.sidebar.radio(
-        "Como deseja baixar o resultado?",
-        ["Novo Arquivo (cotacao_corrigida.xlsx)", "Mesmo nome do arquivo original"]
-    )
+        st.sidebar.subheader("Opções de Download")
+        opcao_salvamento = st.sidebar.radio(
+            "Como deseja baixar o resultado?",
+            ["Novo Arquivo (cotacao_corrigida.xlsx)", "Mesmo nome do arquivo original"]
+        )
 
-    target_file = st.file_uploader("Planilha de Destino", type=["xlsx"])
-    if target_file:
-        c1, c2 = st.columns(2)
-        header_pos = c1.number_input("Linha do Cabeçalho:", 1, 100, 10)
-        start_row = c2.number_input("Linha de início dos produtos:", 1, 1000, 11)
-        t_df_view = pd.read_excel(target_file, header=header_pos-1)
-        col1, col2, col3 = st.columns(3)
-        desc_col = col1.selectbox("Coluna Descrição", t_df_view.columns)
-        bar_col = col2.selectbox("Coluna Barras", t_df_view.columns)
-        price_col = col3.selectbox("Coluna Preço", t_df_view.columns)
+        target_file = st.file_uploader("Planilha de Destino", type=["xlsx"])
+        if target_file:
+            c1, c2 = st.columns(2)
+            header_pos = c1.number_input("Linha do Cabeçalho:", 1, 100, 10)
+            start_row = c2.number_input("Linha de início dos produtos:", 1, 1000, 11)
+            t_df_view = pd.read_excel(target_file, header=header_pos-1)
+            col1, col2, col3 = st.columns(3)
+            desc_col = col1.selectbox("Coluna Descrição", t_df_view.columns)
+            bar_col = col2.selectbox("Coluna Barras", t_df_view.columns)
+            price_col = col3.selectbox("Coluna Preço", t_df_view.columns)
 
-        if st.button("🚀 Processar e Preservar Formatação"):
-            master_db['Stock'] = pd.to_numeric(master_db['Stock'], errors='coerce').fillna(0)
-            product_map = dict(zip(master_db['Barcode'].astype(str), zip(master_db['Price'], master_db['Stock'])))
-            
-            if opcao_salvamento == "Mesmo nome do arquivo original":
-                output_name = target_file.name
-            else:
-                output_name = "cotacao_corrigida.xlsx"
-
-            target_file.seek(0)
-            wb = openpyxl.load_workbook(target_file)
-            ws = wb.active
-            col_indices = {str(ws.cell(row=header_pos, column=i).value).strip(): i for i in range(1, ws.max_column + 1)}
-            
-            try:
-                d_idx = col_indices[desc_col.strip()]
-                b_idx = col_indices[bar_col.strip()]
-                p_idx = col_indices[price_col.strip()]
+            if st.button("🚀 Processar e Preservar Formatação"):
+                master_db['Stock'] = pd.to_numeric(master_db['Stock'], errors='coerce').fillna(0)
+                product_map = dict(zip(master_db['Barcode'].astype(str), zip(master_db['Price'], master_db['Stock'])))
                 
-                for r in range(int(start_row), ws.max_row + 1):
-                    d_val = ws.cell(row=r, column=d_idx).value
-                    if not d_val or str(d_val).strip() == "": continue
+                if opcao_salvamento == "Mesmo nome do arquivo original":
+                    output_name = target_file.name
+                else:
+                    output_name = "cotacao_corrigida.xlsx"
+
+                target_file.seek(0)
+                wb = openpyxl.load_workbook(target_file)
+                ws = wb.active
+                col_indices = {str(ws.cell(row=header_pos, column=i).value).strip(): i for i in range(1, ws.max_column + 1)}
+                
+                try:
+                    d_idx = col_indices[desc_col.strip()]
+                    b_idx = col_indices[bar_col.strip()]
+                    p_idx = col_indices[price_col.strip()]
                     
-                    found_p = None
-                    b_val = ws.cell(row=r, column=b_idx).value
-                    
-                    if "Barras" in modo or "Híbrido" in modo:
-                        barcodes = extract_all_barcodes(b_val)
-                        for b in barcodes:
-                            if b in product_map:
-                                p_val, s_val = product_map[b]
-                                if s_val >= estoque_minimo:
-                                    found_p = p_val
-                                    break
-                            elif ignorar_01:
-                                b_limpo = clean_barcode_prefix(b)
-                                if b_limpo in product_map:
-                                    p_val, s_val = product_map[b_limpo]
+                    for r in range(int(start_row), ws.max_row + 1):
+                        d_val = ws.cell(row=r, column=d_idx).value
+                        if not d_val or str(d_val).strip() == "": continue
+                        
+                        found_p = None
+                        b_val = ws.cell(row=r, column=b_idx).value
+                        
+                        if "Barras" in modo or "Híbrido" in modo:
+                            barcodes = extract_all_barcodes(b_val)
+                            for b in barcodes:
+                                if b in product_map:
+                                    p_val, s_val = product_map[b]
                                     if s_val >= estoque_minimo:
                                         found_p = p_val
                                         break
-                    
-                    if found_p is None and ("Similaridade" in modo or "Híbrido" in modo):
-                        best_sim = 0
-                        d_det = extrair_detalhes(d_val)
-                        for _, row_db in master_db.iterrows():
-                            sim = similarity(d_val, row_db['Description'])
-                            if sim >= 0.75 and d_det == extrair_detalhes(row_db['Description']):
-                                if sim > best_sim:
-                                    best_sim = sim
-                                    found_p = row_db['Price']
-                    
-                    if found_p is not None:
-                        f_p = float(found_p) * (1 - (discount/100))
-                        ws.cell(row=r, column=p_idx).value = extra_round(f_p) if aplicar_arredondamento else f_p
+                                elif ignorar_01:
+                                    b_limpo = clean_barcode_prefix(b)
+                                    if b_limpo in product_map:
+                                        p_val, s_val = product_map[b_limpo]
+                                        if s_val >= estoque_minimo:
+                                            found_p = p_val
+                                            break
+                        
+                        if found_p is None and ("Similaridade" in modo or "Híbrido" in modo):
+                            best_sim = 0
+                            d_det = extrair_detalhes(d_val)
+                            for _, row_db in master_db.iterrows():
+                                sim = similarity(d_val, row_db['Description'])
+                                if sim >= 0.75 and d_det == extrair_detalhes(row_db['Description']):
+                                    if sim > best_sim:
+                                        best_sim = sim
+                                        found_p = row_db['Price']
+                        
+                        if found_p is not None:
+                            f_p = float(found_p) * (1 - (discount/100))
+                            ws.cell(row=r, column=p_idx).value = extra_round(f_p) if aplicar_arredondamento else f_p
 
-                contador_final = 0
-                for r in range(int(start_row), ws.max_row + 1):
-                    celula_preco = ws.cell(row=r, column=p_idx).value
-                    try:
-                        if celula_preco is not None and float(celula_preco) > 0:
-                            contador_final += 1
-                    except: continue
+                    contador_final = 0
+                    for r in range(int(start_row), ws.max_row + 1):
+                        celula_preco = ws.cell(row=r, column=p_idx).value
+                        try:
+                            if celula_preco is not None and float(celula_preco) > 0:
+                                contador_final += 1
+                        except: continue
 
-                out = io.BytesIO()
-                wb.save(out)
-                st.success(f"Sucesso! Foram preenchidos **{contador_final}** itens com preços.")
-                st.download_button(f"📥 Baixar Planilha ({output_name})", out.getvalue(), output_name)
-                
-            except Exception as e:
-                st.error(f"Erro ao processar: {e}")
+                    out = io.BytesIO()
+                    wb.save(out)
+                    st.success(f"Sucesso! Foram preenchidos **{contador_final}** itens com preços.")
+                    st.download_button(f"📥 Baixar Planilha ({output_name})", out.getvalue(), output_name)
+                    
+                except Exception as e:
+                    st.error(f"Erro ao processar: {e}")
+    else:
+        st.error("Seu usuário não possui permissão para utilizar nenhuma regra de busca. Contate o administrador.")
 
 # --- ABA 2: VENDAS ---
 elif aba == "💰 Vendas":
@@ -394,7 +416,7 @@ elif aba == "⚙️ Gerenciar Banco":
         st.success("Banco Updated!")
         st.dataframe(df_resultado.head())
 
-# --- ABA 4: USUÁRIOS (COM A NOVA MATRIZ DE PERMISSÕES INDIVIDUAL) ---
+# --- ABA 4: USUÁRIOS (COM CONTROLE EXPANDIDO DE REGRAS DE BUSCA) ---
 elif aba == "👤 Usuários":
     st.title("👤 Gestão de Usuários e Permissões")
     users = load_users()
@@ -409,9 +431,8 @@ elif aba == "👤 Usuários":
             df_r = pd.read_csv(up_b)
             new_u = {}
             for _, r in df_r.iterrows():
-                # Tenta recuperar permissões antigas se existirem no backup
                 try: perm = json.loads(r['permissions'].replace("'", '"'))
-                except: perm = {"ver_estoque": True, "ver_preco": True, "ver_caixa": True, "ver_quant": True, "funcao_cotacao": True, "funcao_vendas": True}
+                except: perm = {"ver_estoque": True, "ver_preco": True, "ver_caixa": True, "ver_quant": True, "funcao_cotacao": True, "funcao_vendas": True, "busca_hibrido": True, "busca_barras": True, "busca_similaridade": True}
                 new_u[str(r['index'])] = {"password": str(r['password']), "expiry": str(r['expiry']), "role": str(r['role']), "permissions": perm}
             save_users(new_u)
             st.rerun()
@@ -427,13 +448,18 @@ elif aba == "👤 Usuários":
             nd = st.number_input("Validade da Conta (dias)", 1, 365, 30)
             
             st.markdown("---")
-            st.write("📋 **Permissões do Novo Usuário:**")
+            st.write("📋 **Permissões de Campos e Funções:**")
             p_estoque = st.checkbox("Acesso à Coluna: Estoque", value=True)
             p_preco = st.checkbox("Acesso à Coluna: Preço", value=True)
             p_caixa = st.checkbox("Acesso à Coluna: Caixa", value=True)
             p_quant = st.checkbox("Acesso à Coluna: Quantidade (Família)", value=True)
             p_cotacao = st.checkbox("Permitir Função: Processar Cotações", value=True)
             p_vendas = st.checkbox("Permitir Função: Consulta de Vendas / Pedido", value=True)
+            
+            st.write("🔍 **Permissões de Regras de Busca:**")
+            p_hibrido = st.checkbox("Regra: Híbrido (Barras + Similaridade)", value=True)
+            p_barras = st.checkbox("Regra: Apenas Barras", value=True)
+            p_similaridade = st.checkbox("Regra: Apenas Similaridade", value=True)
             
             if st.form_submit_button("Criar Usuário com Permissões"):
                 if nu and np:
@@ -447,7 +473,10 @@ elif aba == "👤 Usuários":
                             "ver_caixa": p_caixa,
                             "ver_quant": p_quant,
                             "funcao_cotacao": p_cotacao,
-                            "funcao_vendas": p_vendas
+                            "funcao_vendas": p_vendas,
+                            "busca_hibrido": p_hibrido,
+                            "busca_barras": p_barras,
+                            "busca_similaridade": p_similaridade
                         }
                     }
                     save_users(users)
@@ -460,9 +489,9 @@ elif aba == "👤 Usuários":
         st.subheader("📝 Editar Usuário Existente")
         u_sel = st.selectbox("Selecione o Usuário para Modificar", list(users.keys()))
         if u_sel:
-            # Carrega permissões atuais ou define padrão se o usuário for herança antiga
             current_perms = users[u_sel].get("permissions", {
-                "ver_estoque": True, "ver_preco": True, "ver_caixa": True, "ver_quant": True, "funcao_cotacao": True, "funcao_vendas": True
+                "ver_estoque": True, "ver_preco": True, "ver_caixa": True, "ver_quant": True, "funcao_cotacao": True, "funcao_vendas": True,
+                "busca_hibrido": True, "busca_barras": True, "busca_similaridade": True
             })
             
             ep = st.text_input("Senha Atual/Nova", value=users[u_sel]["password"])
@@ -471,13 +500,17 @@ elif aba == "👤 Usuários":
             st.markdown("---")
             st.write(f"📋 **Modificar Permissões de '{u_sel}':**")
             
-            # Lista de caixas de seleção preenchidas com os valores salvos no banco
             up_estoque = st.checkbox("Acesso à Coluna: Estoque", value=current_perms.get("ver_estoque", True), key="e_est")
             up_preco = st.checkbox("Acesso à Coluna: Preço", value=current_perms.get("ver_preco", True), key="e_prc")
             up_caixa = st.checkbox("Acesso à Coluna: Caixa", value=current_perms.get("ver_caixa", True), key="e_cx")
             up_quant = st.checkbox("Acesso à Coluna: Quantidade (Família)", value=current_perms.get("ver_quant", True), key="e_qnt")
             up_cotacao = st.checkbox("Permitir Função: Processar Cotações", value=current_perms.get("funcao_cotacao", True), key="e_cot")
             up_vendas = st.checkbox("Permitir Função: Consulta de Vendas / Pedido", value=current_perms.get("funcao_vendas", True), key="e_vnd")
+            
+            st.write("🔍 **Modificar Regras de Busca:**")
+            up_hibrido = st.checkbox("Regra: Híbrido (Barras + Similaridade)", value=current_perms.get("busca_hibrido", True), key="e_hib")
+            up_barras = st.checkbox("Regra: Apenas Barras", value=current_perms.get("busca_barras", True), key="e_bar")
+            up_similaridade = st.checkbox("Regra: Apenas Similaridade", value=current_perms.get("busca_similaridade", True), key="e_sim")
             
             if st.button("Salvar Alterações do Usuário"):
                 users[u_sel].update({
@@ -489,7 +522,10 @@ elif aba == "👤 Usuários":
                         "ver_caixa": up_caixa,
                         "ver_quant": up_quant,
                         "funcao_cotacao": up_cotacao,
-                        "funcao_vendas": up_vendas
+                        "funcao_vendas": up_vendas,
+                        "busca_hibrido": up_hibrido,
+                        "busca_barras": up_barras,
+                        "busca_similaridade": up_similaridade
                     }
                 })
                 save_users(users)
