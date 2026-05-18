@@ -143,12 +143,10 @@ if aba == "📊 Cotação":
     master_db = get_master_db()
     if master_db.empty: st.warning("Banco vazio.")
     
-    # Resgate das permissões do usuário logado
     users = load_users()
     current_user_data = users.get(st.session_state.username, {})
     current_perms = current_user_data.get("permissions", {})
     
-    # Filtra as regras de busca permitidas para este usuário
     modos_permitidos = []
     if current_perms.get("busca_hibrido", True) or st.session_state.user_role == "admin":
         modos_permitidos.append("Híbrido (Barras + Similaridade)")
@@ -416,7 +414,7 @@ elif aba == "⚙️ Gerenciar Banco":
         st.success("Banco Updated!")
         st.dataframe(df_resultado.head())
 
-# --- ABA 4: USUÁRIOS (COM CONTROLE EXPANDIDO DE REGRAS DE BUSCA) ---
+# --- ABA 4: USUÁRIOS (SUPORTE COMPLETO A EDIÇÃO INDIVIDUAL E EM LOTE) ---
 elif aba == "👤 Usuários":
     st.title("👤 Gestão de Usuários e Permissões")
     users = load_users()
@@ -438,7 +436,7 @@ elif aba == "👤 Usuários":
             st.rerun()
             
     st.divider()
-    col_n, col_e = st.columns(2)
+    col_n, col_e, col_l = st.columns(3)
     
     with col_n:
         st.subheader("➕ Criar Novo Usuário")
@@ -536,3 +534,49 @@ elif aba == "👤 Usuários":
                 del users[u_sel]
                 save_users(users)
                 st.rerun()
+
+    with col_l:
+        st.subheader("📦 Edição em Lote")
+        # Filtra a lista para não permitir alterar o admin em lote acidentalmente
+        lista_usuarios_lote = [u for u in list(users.keys()) if u != "admin"]
+        
+        usuarios_selecionados = st.multiselect(
+            "Selecione os Usuários para aplicar em Lote", 
+            options=lista_usuarios_lote,
+            placeholder="Escolha um ou mais usuários"
+        )
+        
+        if usuarios_selecionados:
+            st.markdown("---")
+            st.write("📋 **Permissões que serão replicadas nos selecionados:**")
+            l_estoque = st.checkbox("Acesso à Coluna: Estoque", value=True, key="l_est")
+            l_preco = st.checkbox("Acesso à Coluna: Preço", value=True, key="l_prc")
+            l_caixa = st.checkbox("Acesso à Coluna: Caixa", value=True, key="l_cx")
+            l_quant = st.checkbox("Acesso à Coluna: Quantidade (Família)", value=True, key="l_qnt")
+            l_cotacao = st.checkbox("Permitir Função: Processar Cotações", value=True, key="l_cot")
+            l_vendas = st.checkbox("Permitir Função: Consulta de Vendas / Pedido", value=True, key="l_vnd")
+            
+            st.write("🔍 **Regras de Busca que serão replicadas:**")
+            l_hibrido = st.checkbox("Regra: Híbrido (Barras + Similaridade)", value=True, key="l_hib")
+            l_barras = st.checkbox("Regra: Apenas Barras", value=True, key="l_bar")
+            l_similaridade = st.checkbox("Regra: Apenas Similaridade", value=True, key="l_sim")
+            
+            if st.button("⚡ Aplicar Permissões em Lote", type="primary"):
+                for u in usuarios_selecionados:
+                    if u in users:
+                        users[u]["permissions"] = {
+                            "ver_estoque": l_estoque,
+                            "ver_preco": l_preco,
+                            "ver_caixa": l_caixa,
+                            "ver_quant": l_quant,
+                            "funcao_cotacao": l_cotacao,
+                            "funcao_vendas": l_vendas,
+                            "busca_hibrido": l_hibrido,
+                            "busca_barras": l_barras,
+                            "busca_similaridade": l_similaridade
+                        }
+                save_users(users)
+                st.success(f"Permissões aplicadas com sucesso para {len(usuarios_selecionados)} usuários!")
+                st.rerun()
+        else:
+            st.info("Selecione pelo menos um usuário para abrir a lista de edição em lote.")
