@@ -333,88 +333,122 @@ elif aba == "💰 Vendas":
         else:
             st.info("Carrinho vazio.")
 
-# --- ABA 3: GERENCIAR BANCO ---
+# --- ABA 3: GERENCIAR BANCO (AGORA COM EXPORTAÇÃO PARA EXCEL) ---
 elif aba == "⚙️ Gerenciar Banco":
-    st.title("⚙️ Gerenciar Banco")
-    f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
-    if f and st.button("💾 Salvar Banco"):
-        df_file = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
-        
-        pure_desc = [str(x).strip() if pd.notna(x) else "" for x in list(df_file.iloc[:, 0])] if len(df_file.columns) > 0 else [""] * len(df_file)
-        pure_bar = [str(x).strip() if pd.notna(x) else "" for x in list(df_file.iloc[:, 1])] if len(df_file.columns) > 1 else [""] * len(df_file)
-        pure_price = [float(x) if pd.notna(x) else 0.0 for x in list(df_file.iloc[:, 2])] if len(df_file.columns) > 2 else [0.0] * len(df_file)
-        
-        pure_stock = []
-        for x in list(df_file.iloc[:, 3]):
-            try: pure_stock.append(int(float(x)) if pd.notna(x) else 0)
-            except: pure_stock.append(0)
+    st.title("⚙️ Gerenciar Banco de Dados")
+    master_db = get_master_db()
+    
+    col_upload, col_export = st.columns(2)
+    
+    with col_upload:
+        st.subheader("📥 Atualizar Base de Dados")
+        f = st.file_uploader("Upload Banco (xlsx/csv)", type=["xlsx", "csv"])
+        if f and st.button("💾 Salvar Banco"):
+            df_file = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
             
-        pure_caixa = []
-        for x in list(df_file.iloc[:, 4]):
-            try: pure_caixa.append(float(x) if pd.notna(x) else 0.0)
-            except: pure_caixa.append(0.0)
+            pure_desc = [str(x).strip() if pd.notna(x) else "" for x in list(df_file.iloc[:, 0])] if len(df_file.columns) > 0 else [""] * len(df_file)
+            pure_bar = [str(x).strip() if pd.notna(x) else "" for x in list(df_file.iloc[:, 1])] if len(df_file.columns) > 1 else [""] * len(df_file)
+            pure_price = [float(x) if pd.notna(x) else 0.0 for x in list(df_file.iloc[:, 2])] if len(df_file.columns) > 2 else [0.0] * len(df_file)
             
-        pure_quant = []
-        for x in list(df_file.iloc[:, 5]):
-            try: pure_quant.append(int(float(x)) if pd.notna(x) else 1)
-            except: pure_quant.append(1)
-
-        df_novo = pd.DataFrame({
-            'Description': pure_desc,
-            'Barcode': pure_bar,
-            'Price': pure_price,
-            'Stock': pure_stock,
-            'caixa': pure_caixa,
-            'QUANT': pure_quant
-        })
-
-        df_antigo = get_master_db()
-        
-        def get_num_only(v):
-            m = re.search(r'\d+', str(v))
-            return int(m.group()) if m else 1
-
-        lista_final = []
-        antigo_dict = {}
-        if not df_antigo.empty:
-            antigo_dict = dict(zip(df_antigo['Barcode'].astype(str), df_antigo['QUANT']))
-            
-        for idx, row in df_novo.iterrows():
-            raw_desc = row['Description']
-            raw_barcode = row['Barcode']
-            raw_stock = row['Stock']
-            raw_caixa = row['caixa']
-            raw_quant = row['QUANT']
-            
-            barcode_str = re.sub(r'\D', '', str(raw_barcode).split('.')[0])
-            if not barcode_str: continue
-            
-            if barcode_str in antigo_dict:
-                quant_final = antigo_dict[barcode_str]
-            else:
-                quant_final = raw_quant
+            pure_stock = []
+            for x in list(df_file.iloc[:, 3]):
+                try: pure_stock.append(int(float(x)) if pd.notna(x) else 0)
+                except: pure_stock.append(0)
                 
-            divisor = get_num_only(quant_final)
-            nova_caixa = pd.to_numeric(raw_caixa, errors='coerce')
-            nova_caixa = float(nova_caixa) if not pd.isna(nova_caixa) else 0.0
-            preco_calculado = nova_caixa / divisor if divisor > 0 else 0.0
-            
-            lista_final.append({
-                'Description': raw_desc,
-                'Barcode': barcode_str,
-                'Price': preco_calculado,
-                'Stock': int(raw_stock),
-                'caixa': nova_caixa,
-                'QUANT': quant_final
-            })
-            
-        df_resultado = pd.DataFrame(lista_final)
-        df_resultado.to_csv(DB_STORAGE, index=False)
-        st.cache_data.clear()
-        st.success("Banco Updated!")
-        st.dataframe(df_resultado.head())
+            pure_caixa = []
+            for x in list(df_file.iloc[:, 4]):
+                try: pure_caixa.append(float(x) if pd.notna(x) else 0.0)
+                except: pure_caixa.append(0.0)
+                
+            pure_quant = []
+            for x in list(df_file.iloc[:, 5]):
+                try: pure_quant.append(int(float(x)) if pd.notna(x) else 1)
+                except: pure_quant.append(1)
 
-# --- ABA 4: USUÁRIOS (SUPORTE COMPLETO A EDIÇÃO INDIVIDUAL E EM LOTE) ---
+            df_novo = pd.DataFrame({
+                'Description': pure_desc,
+                'Barcode': pure_bar,
+                'Price': pure_price,
+                'Stock': pure_stock,
+                'caixa': pure_caixa,
+                'QUANT': pure_quant
+            })
+
+            df_antigo = get_master_db()
+            
+            def get_num_only(v):
+                m = re.search(r'\d+', str(v))
+                return int(m.group()) if m else 1
+
+            lista_final = []
+            antigo_dict = {}
+            if not df_antigo.empty:
+                antigo_dict = dict(zip(df_antigo['Barcode'].astype(str), df_antigo['QUANT']))
+                
+            for idx, row in df_novo.iterrows():
+                raw_desc = row['Description']
+                raw_barcode = row['Barcode']
+                raw_stock = row['Stock']
+                raw_caixa = row['caixa']
+                raw_quant = row['QUANT']
+                
+                barcode_str = re.sub(r'\D', '', str(raw_barcode).split('.')[0])
+                if not barcode_str: continue
+                
+                if barcode_str in antigo_dict:
+                    quant_final = antigo_dict[barcode_str]
+                else:
+                    quant_final = raw_quant
+                    
+                divisor = get_num_only(quant_final)
+                nova_caixa = pd.to_numeric(raw_caixa, errors='coerce')
+                nova_caixa = float(nova_caixa) if not pd.isna(nova_caixa) else 0.0
+                preco_calculado = nova_caixa / divisor if divisor > 0 else 0.0
+                
+                lista_final.append({
+                    'Description': raw_desc,
+                    'Barcode': barcode_str,
+                    'Price': preco_calculado,
+                    'Stock': int(raw_stock),
+                    'caixa': nova_caixa,
+                    'QUANT': quant_final
+                })
+                
+            df_resultado = pd.DataFrame(lista_final)
+            df_resultado.to_csv(DB_STORAGE, index=False)
+            st.cache_data.clear()
+            st.success("Banco Updated!")
+            st.rerun()
+
+    with col_export:
+        st.subheader("📤 Exportar Base de Dados")
+        if not master_db.empty:
+            st.write(f"A base possui atualmente **{len(master_db)}** produtos cadastrados.")
+            
+            # Geração do arquivo Excel estruturado em memória para download
+            buffer_db = io.BytesIO()
+            with pd.ExcelWriter(buffer_db, engine='openpyxl') as writer:
+                # Renomeando colunas para manter compatibilidade amigável com a planilha original
+                df_export = master_db.copy()
+                df_export.columns = ['descrição', 'codigo barras', 'preço', 'estoque', 'caixa', 'quant']
+                df_export.to_excel(writer, index=False, sheet_name='TabelaPreco')
+                
+            st.download_button(
+                label="📥 Exportar Banco em Excel (.xlsx)",
+                data=buffer_db.getvalue(),
+                file_name=f"banco_dados_{datetime.now().strftime('%d%m%y_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary"
+            )
+        else:
+            st.info("Não há dados cadastrados na base de dados para exportação.")
+
+    st.divider()
+    st.subheader("🔍 Visualização dos Dados Atuais")
+    if not master_db.empty:
+        st.dataframe(master_db, use_container_width=True)
+
+# --- ABA 4: USUÁRIOS ---
 elif aba == "👤 Usuários":
     st.title("👤 Gestão de Usuários e Permissões")
     users = load_users()
@@ -527,7 +561,7 @@ elif aba == "👤 Usuários":
                     }
                 })
                 save_users(users)
-                st.success(f"Permissões e dados de '{u_sel}' atualizados!")
+                st.success(f"Permissões e dados de '{u_sel}' updated!")
                 st.rerun()
                 
             if u_sel != "admin" and st.button("❌ Excluir Usuário permanentemente"):
@@ -537,7 +571,6 @@ elif aba == "👤 Usuários":
 
     with col_l:
         st.subheader("📦 Edição em Lote")
-        # Filtra a lista para não permitir alterar o admin em lote acidentalmente
         lista_usuarios_lote = [u for u in list(users.keys()) if u != "admin"]
         
         usuarios_selecionados = st.multiselect(
