@@ -138,7 +138,6 @@ users = load_users()
 current_user_data = users.get(st.session_state.username, {})
 current_perms = current_user_data.get("permissions", {})
 
-# Montagem dinâmica das abas permitidas
 tabs = ["📊 Cotação", "💰 Vendas"]
 if current_perms.get("ver_gerenciar_banco", True) or st.session_state.user_role == "admin":
     tabs.append("⚙️ Gerenciar Banco")
@@ -167,7 +166,12 @@ if aba == "📊 Cotação":
         modo = st.sidebar.selectbox("Regra de Busca:", modos_permitidos)
         
         ignorar_01 = st.sidebar.checkbox("Ignorar 0 ou 1 à esquerda no EAN", value=False)
-        estoque_minimo = st.sidebar.number_input("Estoque mínimo para Barras:", min_value=0, value=1)
+        
+        st.sidebar.subheader("Filtros de Estoque Mínimo")
+        estoque_geral = st.sidebar.number_input("Estoque mínimo Geral:", min_value=0, value=1)
+        estoque_unitario = st.sidebar.number_input("Estoque mínimo para Unitários (QUANT = 1):", min_value=0, value=1)
+        estoque_caixas = st.sidebar.number_input("Estoque mínimo para Caixas/Dz/Dp/Cj (QUANT > 1):", min_value=0, value=1)
+        
         discount = st.sidebar.number_input("Desconto (%)", 0.0)
         aplicar_arredondamento = st.sidebar.checkbox("Arredondar preços", value=True)
 
@@ -190,7 +194,20 @@ if aba == "📊 Cotação":
 
             if st.button("🚀 Processar e Preservar Formatação"):
                 master_db['Stock'] = pd.to_numeric(master_db['Stock'], errors='coerce').fillna(0)
-                product_map = dict(zip(master_db['Barcode'].astype(str), zip(master_db['Price'], master_db['Stock'])))
+                
+                # Criamos um mapeamento completo contendo: Preço, Estoque e QUANT
+                product_map = {}
+                for _, row_db in master_db.iterrows():
+                    b_str = str(row_db['Barcode'])
+                    try:
+                        q_val = int(float(row_db['QUANT']))
+                    except:
+                        q_val = 1
+                    product_map[b_str] = {
+                        'Price': row_db['Price'], 
+                        'Stock': row_db['Stock'], 
+                        'QUANT': q_val
+                    }
                 
                 if opcao_salvamento == "Mesmo nome do arquivo original":
                     output_name = target_file.name
@@ -217,17 +234,31 @@ if aba == "📊 Cotação":
                         if "Barras" in modo or "Híbrido" in modo:
                             barcodes = extract_all_barcodes(b_val)
                             for b in barcodes:
+                                target_barcode = None
                                 if b in product_map:
-                                    p_val, s_val = product_map[b]
-                                    if s_val >= estoque_minimo:
-                                        found_p = p_val
-                                        break
+                                    target_barcode = b
                                 elif ignorar_01:
                                     b_limpo = clean_barcode_prefix(b)
                                     if b_limpo in product_map:
-                                        p_val, s_val = product_map[b_limpo]
-                                        if s_val >= estoque_minimo:
-                                            found_p = p_val
+                                        target_barcode = b_limpo
+                                
+                                if target_barcode:
+                                    p_info = product_map[target_barcode]
+                                    s_val = p_info['Stock']
+                                    q_val = p_info['QUANT']
+                                    
+                                    # Aplicação dinâmica das novas regras estruturadas de estoque mínimo
+                                    if q_val == 1:
+                                        if s_val >= estoque_unitario:
+                                            found_p = p_info['Price']
+                                            break
+                                    elif q_val > 1:
+                                        if s_val >= estoque_caixas:
+                                            found_p = p_info['Price']
+                                            break
+                                    else:
+                                        if s_val >= estoque_geral:
+                                            found_p = p_info['Price']
                                             break
                         
                         if found_p is None and ("Similaridade" in modo or "Híbrido" in modo):
@@ -452,7 +483,7 @@ elif aba == "⚙️ Gerenciar Banco":
     if not master_db.empty:
         st.dataframe(master_db, use_container_width=True)
 
-# --- ABA 4: USUÁRIOS (SUPORTE ADICIONADO PARA RESTRICÃO DA ABA GERENCIAR BANCO) ---
+# --- ABA 4: USUÁRIOS ---
 elif aba == "👤 Usuários":
     st.title("👤 Gestão de Usuários e Permissões")
     
