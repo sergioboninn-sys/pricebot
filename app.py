@@ -66,7 +66,8 @@ def load_users():
                     "funcao_vendas": True,
                     "busca_hibrido": True,
                     "busca_barras": True,
-                    "busca_similaridade": True
+                    "busca_similaridade": True,
+                    "ver_gerenciar_banco": True
                 }
             }
         }
@@ -132,9 +133,18 @@ def get_master_db():
         return df
     return pd.DataFrame(columns=['Description', 'Barcode', 'Price', 'Stock', 'caixa', 'QUANT'])
 
-# --- INTERFACE ---
-tabs = ["📊 Cotação", "💰 Vendas", "⚙️ Gerenciar Banco"]
-if st.session_state.user_role == "admin": tabs.append("👤 Usuários")
+# --- INTERFACE & CONTROLE DE NAVEGAÇÃO ---
+users = load_users()
+current_user_data = users.get(st.session_state.username, {})
+current_perms = current_user_data.get("permissions", {})
+
+# Montagem dinâmica das abas permitidas
+tabs = ["📊 Cotação", "💰 Vendas"]
+if current_perms.get("ver_gerenciar_banco", True) or st.session_state.user_role == "admin":
+    tabs.append("⚙️ Gerenciar Banco")
+if st.session_state.user_role == "admin": 
+    tabs.append("👤 Usuários")
+
 aba = st.sidebar.radio("Navegação", tabs)
 
 # --- ABA 1: COTAÇÃO ---
@@ -142,10 +152,6 @@ if aba == "📊 Cotação":
     st.title("📊 Automatizador de Cotações")
     master_db = get_master_db()
     if master_db.empty: st.warning("Banco vazio.")
-    
-    users = load_users()
-    current_user_data = users.get(st.session_state.username, {})
-    current_perms = current_user_data.get("permissions", {})
     
     modos_permitidos = []
     if current_perms.get("busca_hibrido", True) or st.session_state.user_role == "admin":
@@ -333,7 +339,7 @@ elif aba == "💰 Vendas":
         else:
             st.info("Carrinho vazio.")
 
-# --- ABA 3: GERENCIAR BANCO (AGORA COM EXPORTAÇÃO PARA EXCEL) ---
+# --- ABA 3: GERENCIAR BANCO ---
 elif aba == "⚙️ Gerenciar Banco":
     st.title("⚙️ Gerenciar Banco de Dados")
     master_db = get_master_db()
@@ -425,10 +431,8 @@ elif aba == "⚙️ Gerenciar Banco":
         if not master_db.empty:
             st.write(f"A base possui atualmente **{len(master_db)}** produtos cadastrados.")
             
-            # Geração do arquivo Excel estruturado em memória para download
             buffer_db = io.BytesIO()
             with pd.ExcelWriter(buffer_db, engine='openpyxl') as writer:
-                # Renomeando colunas para manter compatibilidade amigável com a planilha original
                 df_export = master_db.copy()
                 df_export.columns = ['descrição', 'codigo barras', 'preço', 'estoque', 'caixa', 'quant']
                 df_export.to_excel(writer, index=False, sheet_name='TabelaPreco')
@@ -448,10 +452,9 @@ elif aba == "⚙️ Gerenciar Banco":
     if not master_db.empty:
         st.dataframe(master_db, use_container_width=True)
 
-# --- ABA 4: USUÁRIOS ---
+# --- ABA 4: USUÁRIOS (SUPORTE ADICIONADO PARA RESTRICÃO DA ABA GERENCIAR BANCO) ---
 elif aba == "👤 Usuários":
     st.title("👤 Gestão de Usuários e Permissões")
-    users = load_users()
     
     c_b1, c_b2 = st.columns(2)
     with c_b1:
@@ -464,7 +467,7 @@ elif aba == "👤 Usuários":
             new_u = {}
             for _, r in df_r.iterrows():
                 try: perm = json.loads(r['permissions'].replace("'", '"'))
-                except: perm = {"ver_estoque": True, "ver_preco": True, "ver_caixa": True, "ver_quant": True, "funcao_cotacao": True, "funcao_vendas": True, "busca_hibrido": True, "busca_barras": True, "busca_similaridade": True}
+                except: perm = {"ver_estoque": True, "ver_preco": True, "ver_caixa": True, "ver_quant": True, "funcao_cotacao": True, "funcao_vendas": True, "busca_hibrido": True, "busca_barras": True, "busca_similaridade": True, "ver_gerenciar_banco": True}
                 new_u[str(r['index'])] = {"password": str(r['password']), "expiry": str(r['expiry']), "role": str(r['role']), "permissions": perm}
             save_users(new_u)
             st.rerun()
@@ -487,6 +490,7 @@ elif aba == "👤 Usuários":
             p_quant = st.checkbox("Acesso à Coluna: Quantidade (Família)", value=True)
             p_cotacao = st.checkbox("Permitir Função: Processar Cotações", value=True)
             p_vendas = st.checkbox("Permitir Função: Consulta de Vendas / Pedido", value=True)
+            p_gerenciar = st.checkbox("Permitir Aba: Gerenciar Banco de Dados", value=True)
             
             st.write("🔍 **Permissões de Regras de Busca:**")
             p_hibrido = st.checkbox("Regra: Híbrido (Barras + Similaridade)", value=True)
@@ -508,7 +512,8 @@ elif aba == "👤 Usuários":
                             "funcao_vendas": p_vendas,
                             "busca_hibrido": p_hibrido,
                             "busca_barras": p_barras,
-                            "busca_similaridade": p_similaridade
+                            "busca_similaridade": p_similaridade,
+                            "ver_gerenciar_banco": p_gerenciar
                         }
                     }
                     save_users(users)
@@ -523,7 +528,7 @@ elif aba == "👤 Usuários":
         if u_sel:
             current_perms = users[u_sel].get("permissions", {
                 "ver_estoque": True, "ver_preco": True, "ver_caixa": True, "ver_quant": True, "funcao_cotacao": True, "funcao_vendas": True,
-                "busca_hibrido": True, "busca_barras": True, "busca_similaridade": True
+                "busca_hibrido": True, "busca_barras": True, "busca_similaridade": True, "ver_gerenciar_banco": True
             })
             
             ep = st.text_input("Senha Atual/Nova", value=users[u_sel]["password"])
@@ -538,6 +543,7 @@ elif aba == "👤 Usuários":
             up_quant = st.checkbox("Acesso à Coluna: Quantidade (Família)", value=current_perms.get("ver_quant", True), key="e_qnt")
             up_cotacao = st.checkbox("Permitir Função: Processar Cotações", value=current_perms.get("funcao_cotacao", True), key="e_cot")
             up_vendas = st.checkbox("Permitir Função: Consulta de Vendas / Pedido", value=current_perms.get("funcao_vendas", True), key="e_vnd")
+            up_gerenciar = st.checkbox("Permitir Aba: Gerenciar Banco de Dados", value=current_perms.get("ver_gerenciar_banco", True), key="e_ger")
             
             st.write("🔍 **Modificar Regras de Busca:**")
             up_hibrido = st.checkbox("Regra: Híbrido (Barras + Similaridade)", value=current_perms.get("busca_hibrido", True), key="e_hib")
@@ -557,11 +563,12 @@ elif aba == "👤 Usuários":
                         "funcao_vendas": up_vendas,
                         "busca_hibrido": up_hibrido,
                         "busca_barras": up_barras,
-                        "busca_similaridade": up_similaridade
+                        "busca_similaridade": up_similaridade,
+                        "ver_gerenciar_banco": up_gerenciar
                     }
                 })
                 save_users(users)
-                st.success(f"Permissões e dados de '{u_sel}' updated!")
+                st.success(f"Permissões e dados de '{u_sel}' atualizados!")
                 st.rerun()
                 
             if u_sel != "admin" and st.button("❌ Excluir Usuário permanentemente"):
@@ -588,6 +595,7 @@ elif aba == "👤 Usuários":
             l_quant = st.checkbox("Acesso à Coluna: Quantidade (Família)", value=True, key="l_qnt")
             l_cotacao = st.checkbox("Permitir Função: Processar Cotações", value=True, key="l_cot")
             l_vendas = st.checkbox("Permitir Função: Consulta de Vendas / Pedido", value=True, key="l_vnd")
+            l_gerenciar = st.checkbox("Permitir Aba: Gerenciar Banco de Dados", value=True, key="l_ger")
             
             st.write("🔍 **Regras de Busca que serão replicadas:**")
             l_hibrido = st.checkbox("Regra: Híbrido (Barras + Similaridade)", value=True, key="l_hib")
@@ -606,7 +614,8 @@ elif aba == "👤 Usuários":
                             "funcao_vendas": l_vendas,
                             "busca_hibrido": l_hibrido,
                             "busca_barras": l_barras,
-                            "busca_similaridade": l_similaridade
+                            "busca_similaridade": l_similaridade,
+                            "ver_gerenciar_banco": l_gerenciar
                         }
                 save_users(users)
                 st.success(f"Permissões aplicadas com sucesso para {len(usuarios_selecionados)} usuários!")
