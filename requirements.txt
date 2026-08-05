@@ -1,3 +1,4 @@
 streamlit
 pandas
 openpyxl
+starlette==0.37.2
