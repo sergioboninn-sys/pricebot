@@ -483,6 +483,163 @@ elif aba == "⚙️ Gerenciar Banco":
     if not master_db.empty:
         st.dataframe(master_db, use_container_width=True)
 
+    # =====================================================================
+    # >>> INÍCIO DO NOVO BLOCO 1: EXPORTAR BANCO COM DESCONTO E FILTRO DE ESTOQUE
+    # =====================================================================
+    st.divider()
+    st.subheader("🏷️ Exportar Banco com Desconto e Filtro de Estoque")
+
+    if not master_db.empty:
+        def _quant_para_int(v):
+            try:
+                return int(float(v))
+            except:
+                return 1
+
+        ex_c1, ex_c2 = st.columns(2)
+        exp_desconto = ex_c1.number_input(
+            "Desconto (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5, key="exp_desconto_banco"
+        )
+        exp_arredondar = ex_c2.checkbox("Arredondar preços", value=True, key="exp_arredondar_banco")
+
+        st.write("**Filtros de Estoque Mínimo**")
+        ex_c3, ex_c4, ex_c5 = st.columns(3)
+        exp_est_geral = ex_c3.number_input(
+            "Estoque mínimo Geral:", min_value=0, value=1, key="exp_est_geral_banco"
+        )
+        exp_est_unit = ex_c4.number_input(
+            "Estoque mínimo para Unitários (QUANT = 1):", min_value=0, value=1, key="exp_est_unit_banco"
+        )
+        exp_est_cx = ex_c5.number_input(
+            "Estoque mínimo para Caixas/Dz/Dp/Cj (QUANT > 1):", min_value=0, value=1, key="exp_est_cx_banco"
+        )
+
+        df_exp = master_db.copy()
+        df_exp['Stock'] = pd.to_numeric(df_exp['Stock'], errors='coerce').fillna(0)
+        df_exp['Price'] = pd.to_numeric(df_exp['Price'], errors='coerce').fillna(0.0)
+        df_exp['caixa'] = pd.to_numeric(df_exp['caixa'], errors='coerce').fillna(0.0)
+
+        quant_serie = df_exp['QUANT'].apply(_quant_para_int)
+
+        # Mesma regra de estoque mínimo usada na aba de Cotação
+        mask_unit = (quant_serie == 1) & (df_exp['Stock'] >= exp_est_unit)
+        mask_cx = (quant_serie > 1) & (df_exp['Stock'] >= exp_est_cx)
+        mask_geral = (quant_serie < 1) & (df_exp['Stock'] >= exp_est_geral)
+        df_exp = df_exp[mask_unit | mask_cx | mask_geral].copy()
+
+        fator_desc = 1 - (exp_desconto / 100)
+        df_exp['Price'] = df_exp['Price'] * fator_desc
+        df_exp['caixa'] = df_exp['caixa'] * fator_desc
+        if exp_arredondar:
+            df_exp['Price'] = df_exp['Price'].apply(extra_round)
+            df_exp['caixa'] = df_exp['caixa'].apply(extra_round)
+
+        st.write(f"**{len(df_exp)}** de **{len(master_db)}** produtos atendem aos filtros de estoque.")
+
+        if df_exp.empty:
+            st.warning("Nenhum produto atende aos filtros de estoque informados.")
+        else:
+            df_exp_saida = df_exp[['Description', 'Barcode', 'Price', 'Stock', 'caixa', 'QUANT']].copy()
+            df_exp_saida.columns = ['descrição', 'codigo barras', 'preço', 'estoque', 'caixa', 'quant']
+
+            with st.expander("👁️ Pré-visualizar exportação (primeiras 50 linhas)"):
+                st.dataframe(df_exp_saida.head(50), use_container_width=True)
+
+            buffer_db_desc = io.BytesIO()
+            with pd.ExcelWriter(buffer_db_desc, engine='openpyxl') as writer_desc:
+                df_exp_saida.to_excel(writer_desc, index=False, sheet_name='TabelaPreco')
+
+            st.download_button(
+                label=f"📥 Exportar Banco com {exp_desconto:g}% de desconto (.xlsx)",
+                data=buffer_db_desc.getvalue(),
+                file_name=f"banco_desc_{exp_desconto:g}pct_{datetime.now().strftime('%d%m%y_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                key="btn_download_banco_desconto"
+            )
+    else:
+        st.info("Não há dados cadastrados na base de dados para exportação.")
+    # =====================================================================
+    # >>> FIM DO NOVO BLOCO 1
+    # =====================================================================
+
+    # =====================================================================
+    # >>> INÍCIO DO NOVO BLOCO 2: EDITAR O BANCO DE DADOS DIRETAMENTE NA TELA
+    # =====================================================================
+    st.divider()
+    st.subheader("✏️ Editar Banco de Dados")
+    st.caption(
+        "Clique em qualquer célula para corrigir. Para adicionar uma linha, use a última linha em branco da tabela. "
+        "Para excluir, selecione a linha (caixa à esquerda) e pressione Delete. "
+        "As alterações só valem depois de clicar em **Salvar Alterações no Banco**."
+    )
+
+    if 'editor_banco_versao' not in st.session_state:
+        st.session_state.editor_banco_versao = 0
+
+    df_para_editar = master_db.copy()
+    df_para_editar['Description'] = df_para_editar['Description'].fillna("").astype(str)
+    df_para_editar['Barcode'] = df_para_editar['Barcode'].astype(str)
+    df_para_editar['Price'] = pd.to_numeric(df_para_editar['Price'], errors='coerce').fillna(0.0)
+    df_para_editar['caixa'] = pd.to_numeric(df_para_editar['caixa'], errors='coerce').fillna(0.0)
+    df_para_editar['Stock'] = pd.to_numeric(df_para_editar['Stock'], errors='coerce').fillna(0).astype(int)
+    df_para_editar['QUANT'] = pd.to_numeric(df_para_editar['QUANT'], errors='coerce').fillna(1).astype(int)
+    df_para_editar = df_para_editar[['Description', 'Barcode', 'Price', 'Stock', 'caixa', 'QUANT']].reset_index(drop=True)
+
+    df_editado = st.data_editor(
+        df_para_editar,
+        num_rows="dynamic",
+        use_container_width=True,
+        key=f"editor_banco_{st.session_state.editor_banco_versao}",
+        column_config={
+            "Description": st.column_config.TextColumn("Descrição"),
+            "Barcode": st.column_config.TextColumn("Código de Barras"),
+            "Price": st.column_config.NumberColumn("Preço", format="%.2f", min_value=0.0),
+            "Stock": st.column_config.NumberColumn("Estoque", step=1),
+            "caixa": st.column_config.NumberColumn("Caixa", format="%.2f", min_value=0.0),
+            "QUANT": st.column_config.NumberColumn("Quant", step=1, min_value=1),
+        }
+    )
+
+    if st.button("💾 Salvar Alterações no Banco", type="primary", key="btn_salvar_edicao_banco"):
+        df_salvar = df_editado.copy()
+        df_salvar['Description'] = df_salvar['Description'].fillna("").astype(str).str.strip()
+        df_salvar['Barcode'] = df_salvar['Barcode'].apply(
+            lambda x: re.sub(r'\D', '', str(x).split('.')[0]) if pd.notna(x) else ""
+        )
+        df_salvar['Price'] = pd.to_numeric(df_salvar['Price'], errors='coerce').fillna(0.0)
+        df_salvar['caixa'] = pd.to_numeric(df_salvar['caixa'], errors='coerce').fillna(0.0)
+        df_salvar['Stock'] = pd.to_numeric(df_salvar['Stock'], errors='coerce').fillna(0).astype(int)
+        df_salvar['QUANT'] = pd.to_numeric(df_salvar['QUANT'], errors='coerce').fillna(1).astype(int)
+
+        qtd_sem_barras = int((df_salvar['Barcode'] == "").sum())
+
+        if qtd_sem_barras > 0:
+            st.error(
+                f"Existem {qtd_sem_barras} linha(s) sem código de barras válido. "
+                "Preencha ou exclua essas linhas antes de salvar."
+            )
+        else:
+            qtd_duplicados = int(df_salvar['Barcode'].duplicated(keep=False).sum())
+
+            # Cópia de segurança do banco antes de sobrescrever
+            if os.path.exists(DB_STORAGE):
+                master_db.to_csv("master_database_backup.csv", index=False)
+
+            df_salvar = df_salvar[['Description', 'Barcode', 'Price', 'Stock', 'caixa', 'QUANT']]
+            df_salvar.to_csv(DB_STORAGE, index=False)
+            st.cache_data.clear()
+            st.session_state.editor_banco_versao += 1
+
+            if qtd_duplicados > 0:
+                st.toast(f"Banco salvo com {len(df_salvar)} produtos. Atenção: {qtd_duplicados} linhas com código de barras repetido.", icon="⚠️")
+            else:
+                st.toast(f"Banco salvo com sucesso! {len(df_salvar)} produtos.", icon="✅")
+            st.rerun()
+    # =====================================================================
+    # >>> FIM DO NOVO BLOCO 2
+    # =====================================================================
+
 # --- ABA 4: USUÁRIOS ---
 elif aba == "👤 Usuários":
     st.title("👤 Gestão de Usuários e Permissões")
