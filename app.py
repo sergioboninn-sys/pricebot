@@ -564,6 +564,68 @@ elif aba == "⚙️ Gerenciar Banco":
     # =====================================================================
 
     # =====================================================================
+    # >>> INÍCIO DO NOVO BLOCO 4: SAÍDA ESPECÍFICA "exemplo-importacao" (CSV SEPARADO POR VÍRGULAS)
+    # =====================================================================
+    st.divider()
+    st.subheader("📄 Exportar Planilha de Importação (exemplo-importacao.csv)")
+
+    if not master_db.empty:
+        st.caption(
+            "Esta saída usa os mesmos critérios definidos no bloco acima (Desconto, Arredondamento e Filtros de Estoque Mínimo). "
+            "Colunas geradas, nesta ordem: **EAN**, **DUN**, **Qtd. Embalagem** e **Vlr. Custo**. "
+            "Formato igual ao arquivo de exemplo: colunas separadas por ponto e vírgula (;), preço com vírgula decimal e sem aspas."
+        )
+
+        if df_exp.empty:
+            st.warning("Nenhum produto atende aos filtros de estoque informados.")
+        else:
+            def _formatar_preco_virgula(v):
+                try:
+                    num_preco = float(v)
+                except (TypeError, ValueError):
+                    return ""
+                texto_preco = f"{num_preco:.2f}" if exp_arredondar else format(Decimal(str(num_preco)), 'f')
+                if '.' in texto_preco:
+                    texto_preco = texto_preco.rstrip('0').rstrip('.')
+                return texto_preco.replace('.', ',')
+
+            df_importacao = pd.DataFrame({
+                'EAN': df_exp['Barcode'].astype(str),
+                'DUN': df_exp['Barcode'].astype(str),
+                'Qtd. Embalagem': 1,
+                'Vlr. Custo': df_exp['Price'].apply(_formatar_preco_virgula)
+            })
+
+            st.write(f"**{len(df_importacao)}** produtos serão exportados na planilha de importação.")
+
+            with st.expander("👁️ Pré-visualizar planilha de importação (primeiras 50 linhas)"):
+                st.dataframe(df_importacao.head(50), use_container_width=True)
+
+            # Formato idêntico ao arquivo de exemplo: separador ";" (padrão do CSV no Excel em português),
+            # preço com vírgula decimal sem aspas e quebra de linha no padrão Windows (CRLF).
+            import csv as csv_padrao
+            buffer_csv_imp = io.StringIO()
+            escritor_csv_imp = csv_padrao.writer(buffer_csv_imp, delimiter=";", lineterminator="\r\n")
+            escritor_csv_imp.writerow(list(df_importacao.columns))
+            for linha_imp in df_importacao.itertuples(index=False, name=None):
+                escritor_csv_imp.writerow(linha_imp)
+            csv_importacao = buffer_csv_imp.getvalue().encode('utf-8')
+
+            st.download_button(
+                label=f"📥 Exportar exemplo-importacao.csv com {exp_desconto:g}% de desconto",
+                data=csv_importacao,
+                file_name="exemplo-importacao.csv",
+                mime="text/csv",
+                type="primary",
+                key="btn_download_exemplo_importacao"
+            )
+    else:
+        st.info("Não há dados cadastrados na base de dados para exportação.")
+    # =====================================================================
+    # >>> FIM DO NOVO BLOCO 4
+    # =====================================================================
+
+    # =====================================================================
     # >>> INÍCIO DO NOVO BLOCO 2: EDITAR O BANCO DE DADOS DIRETAMENTE NA TELA
     # =====================================================================
     st.divider()
