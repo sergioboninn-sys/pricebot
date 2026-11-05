@@ -640,6 +640,114 @@ elif aba == "⚙️ Gerenciar Banco":
     # >>> FIM DO NOVO BLOCO 2
     # =====================================================================
 
+    # =====================================================================
+    # >>> INÍCIO DO NOVO BLOCO 3: RECALCULAR PREÇO (CAIXA ÷ QUANT) NAS LINHAS ALTERADAS
+    # =====================================================================
+    st.markdown("---")
+    st.subheader("🔄 Recalcular Preço (Caixa ÷ Quant)")
+    st.caption(
+        "Recalcula o Preço (Preço = Caixa ÷ Quant, a mesma regra da importação) somente nas linhas em que você "
+        "alterou **Caixa** ou **Quant** na tabela acima, e também nas linhas novas sem preço informado. "
+        "Linhas em que você editou o **Preço** manualmente não são recalculadas. "
+        "Ao clicar no botão, o preço é recalculado e o banco é salvo."
+    )
+
+    def _indices_para_recalcular(df_original, df_atual):
+        comuns = df_atual.index.intersection(df_original.index)
+        novos = df_atual.index.difference(df_original.index)
+
+        alvo_alterados = []
+        if len(comuns) > 0:
+            o = df_original.loc[comuns]
+            a = df_atual.loc[comuns]
+            caixa_a = pd.to_numeric(a['caixa'], errors='coerce').fillna(0.0)
+            quant_a = pd.to_numeric(a['QUANT'], errors='coerce').fillna(1)
+            preco_a = pd.to_numeric(a['Price'], errors='coerce').fillna(0.0)
+            caixa_mudou = (caixa_a - o['caixa']).abs() > 1e-9
+            quant_mudou = (quant_a - o['QUANT']).abs() > 1e-9
+            preco_mudou = (preco_a - o['Price']).abs() > 1e-9
+            alvo_alterados = list(comuns[((caixa_mudou | quant_mudou) & ~preco_mudou).to_numpy()])
+
+        alvo_novos = []
+        if len(novos) > 0:
+            preco_novos = pd.to_numeric(df_atual.loc[novos, 'Price'], errors='coerce').fillna(0.0)
+            alvo_novos = list(novos[(preco_novos == 0).to_numpy()])
+
+        return alvo_alterados + alvo_novos
+
+    def _preco_recalculado(caixa, quant):
+        c_val = pd.to_numeric(caixa, errors='coerce')
+        c_val = float(c_val) if not pd.isna(c_val) else 0.0
+        q_val = pd.to_numeric(quant, errors='coerce')
+        q_val = int(q_val) if not pd.isna(q_val) else 1
+        return c_val / q_val if q_val > 0 else 0.0
+
+    rc_indices = _indices_para_recalcular(df_para_editar, df_editado)
+
+    if rc_indices:
+        rc_previa = []
+        for i_rc in rc_indices:
+            lin_rc = df_editado.loc[i_rc]
+            rc_previa.append({
+                "Descrição": lin_rc['Description'],
+                "Código de Barras": lin_rc['Barcode'],
+                "Caixa": lin_rc['caixa'],
+                "Quant": lin_rc['QUANT'],
+                "Preço atual": lin_rc['Price'],
+                "Preço recalculado": _preco_recalculado(lin_rc['caixa'], lin_rc['QUANT'])
+            })
+        st.write(f"**{len(rc_indices)}** linha(s) serão recalculadas ao clicar no botão (exibindo até 50):")
+        st.dataframe(pd.DataFrame(rc_previa).head(50), use_container_width=True)
+    else:
+        st.info("Nenhuma linha com Caixa ou Quant alterados no momento.")
+
+    if st.button(
+        "🔄 Recalcular Preço nas Linhas Alteradas e Salvar",
+        type="primary",
+        key="btn_recalcular_preco_banco",
+        disabled=(len(rc_indices) == 0)
+    ):
+        df_rc = df_editado.copy()
+        df_rc['Description'] = df_rc['Description'].fillna("").astype(str).str.strip()
+        df_rc['Barcode'] = df_rc['Barcode'].apply(
+            lambda x: re.sub(r'\D', '', str(x).split('.')[0]) if pd.notna(x) else ""
+        )
+        df_rc['Price'] = pd.to_numeric(df_rc['Price'], errors='coerce').fillna(0.0)
+        df_rc['caixa'] = pd.to_numeric(df_rc['caixa'], errors='coerce').fillna(0.0)
+        df_rc['Stock'] = pd.to_numeric(df_rc['Stock'], errors='coerce').fillna(0).astype(int)
+        df_rc['QUANT'] = pd.to_numeric(df_rc['QUANT'], errors='coerce').fillna(1).astype(int)
+
+        for i_rc in rc_indices:
+            df_rc.loc[i_rc, 'Price'] = _preco_recalculado(df_rc.loc[i_rc, 'caixa'], df_rc.loc[i_rc, 'QUANT'])
+
+        rc_sem_barras = int((df_rc['Barcode'] == "").sum())
+
+        if rc_sem_barras > 0:
+            st.error(
+                f"Existem {rc_sem_barras} linha(s) sem código de barras válido. "
+                "Preencha ou exclua essas linhas antes de salvar."
+            )
+        else:
+            rc_duplicados = int(df_rc['Barcode'].duplicated(keep=False).sum())
+
+            # Cópia de segurança do banco antes de sobrescrever
+            if os.path.exists(DB_STORAGE):
+                master_db.to_csv("master_database_backup.csv", index=False)
+
+            df_rc = df_rc[['Description', 'Barcode', 'Price', 'Stock', 'caixa', 'QUANT']]
+            df_rc.to_csv(DB_STORAGE, index=False)
+            st.cache_data.clear()
+            st.session_state.editor_banco_versao += 1
+
+            if rc_duplicados > 0:
+                st.toast(f"{len(rc_indices)} preço(s) recalculado(s) e banco salvo. Atenção: {rc_duplicados} linhas com código de barras repetido.", icon="⚠️")
+            else:
+                st.toast(f"{len(rc_indices)} preço(s) recalculado(s) e banco salvo com sucesso!", icon="✅")
+            st.rerun()
+    # =====================================================================
+    # >>> FIM DO NOVO BLOCO 3
+    # =====================================================================
+
 # --- ABA 4: USUÁRIOS ---
 elif aba == "👤 Usuários":
     st.title("👤 Gestão de Usuários e Permissões")
